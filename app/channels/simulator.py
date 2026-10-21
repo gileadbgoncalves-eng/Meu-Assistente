@@ -8,6 +8,11 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
+# Garante suporte a UTF-8 no terminal Windows
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 from app.config import settings
 from app.db.session import init_db, async_session_factory
 from app.db.models import EventModel, ChangeLogModel
