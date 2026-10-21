@@ -35,12 +35,14 @@ class Settings(BaseSettings):
     )
     DEFAULT_LOCALE: str = "pt_BR"
 
-    # WhatsApp Cloud API (para integração futura/produção)
-    WHATSAPP_VERIFY_TOKEN: str = ""
+    # WhatsApp Cloud API (para integração com a Meta)
+    WHATSAPP_VERIFY_TOKEN: str = "meu_assistente_token_verificacao"
     WHATSAPP_ACCESS_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_APP_SECRET: str = ""
+    WHATSAPP_API_VERSION: str = "v21.0"
 
-    # Futuras integrações
+    # Futuras integrações (Google Agenda & Maps)
     GOOGLE_CALENDAR_CREDENTIALS_FILE: str = ""
     GOOGLE_MAPS_API_KEY: str = ""
 

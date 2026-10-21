@@ -17,9 +17,22 @@ class Base(DeclarativeBase):
     pass
 
 
+def get_normalized_database_url(raw_url: str) -> str:
+    """Normaliza URLs de conexão para os drivers assíncronos compatíveis."""
+    if raw_url.startswith("postgres://"):
+        return raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if raw_url.startswith("postgresql://") and not raw_url.startswith("postgresql+asyncpg://"):
+        return raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if raw_url.startswith("sqlite://") and not raw_url.startswith("sqlite+aiosqlite://"):
+        return raw_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
+    return raw_url
+
+
+database_url = get_normalized_database_url(settings.DATABASE_URL)
+
 # Criação da engine assíncrona
 engine: AsyncEngine = create_async_engine(
-    settings.DATABASE_URL,
+    database_url,
     echo=settings.DEBUG,
     future=True,
 )
