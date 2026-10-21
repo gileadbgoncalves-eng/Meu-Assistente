@@ -1,0 +1,343 @@
+"""Camada de repositório assíncrono com SQLAlchemy 2.0 e isolamento de segurança."""
+
+from datetime import datetime, timezone
+from typing import Optional, Sequence
+from sqlalchemy import select, and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.db.models import (
+    UserModel,
+    EventModel,
+    EventParticipantModel,
+    LocationModel,
+    ChangeLogModel,
+    MessageProcessingModel,
+    ContactModel,
+)
+from app.domain.enums import EventStatus, ActionType
+from app.domain.exceptions import (
+    EntityNotFoundError,
+    UnauthorizedAccessError,
+    IdempotencyDuplicateError,
+)
+
+
+class UserRepository:
+    """Repositório de acesso e gestão de usuários."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_by_id(self, user_id: int) -> Optional[UserModel]:
+        result = await self.session.execute(
+            select(UserModel).where(UserModel.id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_phone(self, phone_number: str) -> Optional[UserModel]:
+        result = await self.session.execute(
+            select(UserModel).where(UserModel.phone_number == phone_number)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_or_create(
+        self,
+        phone_number: str,
+        display_name: str,
+        user_timezone: str = "America/Sao_Paulo",
+    ) -> UserModel:
+        user = await self.get_by_phone(phone_number)
+        if not user:
+            user = UserModel(
+                phone_number=phone_number,
+                display_name=display_name,
+                timezone=user_timezone,
+            )
+            self.session.add(user)
+            await self.session.flush()
+        return user
+
+
+class EventRepository:
+    """Repositório de eventos com escopo estrito por usuário e auditoria append-only."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create_event(
+        self,
+        owner_user_id: int,
+        title: str,
+        start_time: datetime,
+        end_time: datetime,
+        timezone: str = "America/Sao_Paulo",
+        description: Optional[str] = None,
+        location_address: Optional[str] = None,
+        participants_data: Optional[list[dict]] = None,
+        status: str = EventStatus.DRAFT.value,
+        confidence_score: float = 1.0,
+        author_user_id: Optional[int] = None,
+    ) -> EventModel:
+        author_id = author_user_id or owner_user_id
+
+        # Se houver localização, cria registro
+        location_id = None
+        if location_address:
+            location = LocationModel(raw_address=location_address)
+            self.session.add(location)
+            await self.session.flush()
+            location_id = location.id
+
+        event = EventModel(
+            owner_user_id=owner_user_id,
+            title=title,
+            description=description,
+            start_time=start_time,
+            end_time=end_time,
+            timezone=timezone,
+            location_id=location_id,
+            status=status,
+            confidence_score=confidence_score,
+        )
+        self.session.add(event)
+        await self.session.flush()
+
+        # Adiciona participantes
+        if participants_data:
+            for p in participants_data:
+                participant = EventParticipantModel(
+                    event_id=event.id,
+                    name=p.get("name", "Participante"),
+                    phone_number=p.get("phone_number"),
+                    contact_id=p.get("contact_id"),
+                    role=p.get("role", "attendee"),
+                    status=p.get("status", "pending"),
+                    replaces_participant_id=p.get("replaces_participant_id"),
+                )
+                self.session.add(participant)
+            await self.session.flush()
+
+        # Grava trilha de auditoria append-only
+        audit_log = ChangeLogModel(
+            entity_name="event",
+            entity_id=event.id,
+            author_user_id=author_id,
+            action=ActionType.CREATE.value,
+            new_values={
+                "title": title,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "status": status,
+            },
+            reason="Criação de compromisso",
+        )
+        self.session.add(audit_log)
+        await self.session.flush()
+
+        # Recarrega o evento com os participantes
+        return await self.get_by_id(event.id, owner_user_id=owner_user_id)  # type: ignore
+
+    async def get_by_id(self, event_id: int, owner_user_id: int) -> Optional[EventModel]:
+        """Busca evento garantindo isolamento: só retorna se pertencer ao owner_user_id."""
+        query = (
+            select(EventModel)
+            .options(
+                selectinload(EventModel.participants),
+                selectinload(EventModel.location),
+            )
+            .where(
+                and_(
+                    EventModel.id == event_id,
+                    EventModel.owner_user_id == owner_user_id,
+                )
+            )
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def find_conflicts(
+        self,
+        owner_user_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        exclude_event_id: Optional[int] = None,
+    ) -> Sequence[EventModel]:
+        """Busca eventos confirmados ou rascunhos que se sobreponham ao intervalo informado."""
+        filters = [
+            EventModel.owner_user_id == owner_user_id,
+            EventModel.status.in_([EventStatus.CONFIRMED.value, EventStatus.DRAFT.value]),
+            # Condição de sobreposição: start_A < end_B AND end_A > start_B
+            EventModel.start_time < end_time,
+            EventModel.end_time > start_time,
+        ]
+        if exclude_event_id is not None:
+            filters.append(EventModel.id != exclude_event_id)
+
+        query = (
+            select(EventModel)
+            .options(selectinload(EventModel.participants))
+            .where(and_(*filters))
+            .order_by(EventModel.start_time.asc())
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def list_events_in_range(
+        self,
+        owner_user_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        include_cancelled: bool = False,
+    ) -> Sequence[EventModel]:
+        """Lista compromissos do usuário dentro de um período."""
+        statuses = [EventStatus.CONFIRMED.value, EventStatus.DRAFT.value]
+        if include_cancelled:
+            statuses.append(EventStatus.CANCELLED.value)
+
+        query = (
+            select(EventModel)
+            .options(
+                selectinload(EventModel.participants),
+                selectinload(EventModel.location),
+            )
+            .where(
+                and_(
+                    EventModel.owner_user_id == owner_user_id,
+                    EventModel.status.in_(statuses),
+                    EventModel.start_time >= start_time,
+                    EventModel.start_time <= end_time,
+                )
+            )
+            .order_by(EventModel.start_time.asc())
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def update_event(
+        self,
+        event_id: int,
+        owner_user_id: int,
+        updates: dict,
+        author_user_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> EventModel:
+        """Atualiza campos de um evento e registra a mudança na trilha de auditoria."""
+        event = await self.get_by_id(event_id, owner_user_id=owner_user_id)
+        if not event:
+            raise EntityNotFoundError("Evento", event_id)
+
+        previous_values = {}
+        for key, value in updates.items():
+            if hasattr(event, key):
+                current_val = getattr(event, key)
+                previous_values[key] = (
+                    current_val.isoformat() if isinstance(current_val, datetime) else current_val
+                )
+                setattr(event, key, value)
+
+        # Grava trilha de auditoria
+        audit = ChangeLogModel(
+            entity_name="event",
+            entity_id=event.id,
+            author_user_id=author_user_id or owner_user_id,
+            action=ActionType.UPDATE.value,
+            previous_values=previous_values,
+            new_values={
+                k: (v.isoformat() if isinstance(v, datetime) else v)
+                for k, v in updates.items()
+            },
+            reason=reason or "Atualização de compromisso",
+        )
+        self.session.add(audit)
+        await self.session.flush()
+        return event
+
+    async def cancel_event(
+        self,
+        event_id: int,
+        owner_user_id: int,
+        author_user_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> EventModel:
+        """Cancela um evento e registra o motivo no change_log."""
+        return await self.update_event(
+            event_id=event_id,
+            owner_user_id=owner_user_id,
+            updates={"status": EventStatus.CANCELLED.value},
+            author_user_id=author_user_id,
+            reason=reason or "Cancelamento de compromisso",
+        )
+
+
+class IdempotencyRepository:
+    """Gerencia deduplicação de mensagens e webhooks para evitar operações repetidas."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def register_message(
+        self,
+        idempotency_key: str,
+        user_id: int,
+        raw_text: str,
+    ) -> MessageProcessingModel:
+        """Registra a mensagem; se a chave já existir, lança IdempotencyDuplicateError."""
+        query = select(MessageProcessingModel).where(
+            MessageProcessingModel.idempotency_key == idempotency_key
+        )
+        result = await self.session.execute(query)
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            raise IdempotencyDuplicateError(idempotency_key)
+
+        record = MessageProcessingModel(
+            idempotency_key=idempotency_key,
+            user_id=user_id,
+            raw_text=raw_text,
+            status="received",
+        )
+        self.session.add(record)
+        await self.session.flush()
+        return record
+
+    async def update_status(
+        self,
+        idempotency_key: str,
+        status: str,
+        detected_intent: Optional[str] = None,
+    ) -> None:
+        query = select(MessageProcessingModel).where(
+            MessageProcessingModel.idempotency_key == idempotency_key
+        )
+        result = await self.session.execute(query)
+        record = result.scalar_one_or_none()
+        if record:
+            record.status = status
+            if detected_intent:
+                record.detected_intent = detected_intent
+            await self.session.flush()
+
+
+class ChangeLogRepository:
+    """Consulta à trilha de auditoria append-only."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_history_for_entity(
+        self, entity_name: str, entity_id: int
+    ) -> Sequence[ChangeLogModel]:
+        query = (
+            select(ChangeLogModel)
+            .where(
+                and_(
+                    ChangeLogModel.entity_name == entity_name,
+                    ChangeLogModel.entity_id == entity_id,
+                )
+            )
+            .order_by(ChangeLogModel.created_at.asc())
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all()
