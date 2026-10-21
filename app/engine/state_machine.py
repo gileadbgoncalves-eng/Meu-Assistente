@@ -1,0 +1,105 @@
+"""Máquina de estados para gerenciamento de propostas pendentes e confirmações."""
+
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Optional
+from pydantic import BaseModel, Field
+
+from app.domain.enums import ActionType
+
+
+class ResponseDisposition(str, Enum):
+    """Classificação da resposta do usuário frente a uma ação pendente."""
+    CONFIRMED = "confirmed"     # Usuário aprovou a ação explicitamente ("sim", "pode agendar")
+    DENIED = "denied"           # Usuário recusou a ação ("não", "cancela", "deixa quieto")
+    NEW_INPUT = "new_input"     # Usuário enviou nova instrução ou dado adicional
+    NO_PENDING = "no_pending"   # Não havia proposta pendente de confirmação
+
+
+class PendingProposal(BaseModel):
+    """Proposta mantida em memória aguardando confirmação do usuário."""
+    user_id: int
+    action_type: ActionType
+    target_event_id: Optional[int] = None
+    data: dict = Field(default_factory=dict)
+    summary: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ConversationStateManager:
+    """Gerenciador de estado de conversas e confirmações ativas por usuário."""
+
+    def __init__(self):
+        # Armazena em memória as propostas pendentes indexadas por user_id
+        self._pending_proposals: dict[int, PendingProposal] = {}
+
+    def set_pending(self, user_id: int, proposal: PendingProposal) -> None:
+        """Registra uma proposta pendente para o usuário."""
+        self._pending_proposals[user_id] = proposal
+
+    def get_pending(self, user_id: int) -> Optional[PendingProposal]:
+        """Obtém a proposta pendente do usuário, se houver."""
+        return self._pending_proposals.get(user_id)
+
+    def clear_pending(self, user_id: int) -> Optional[PendingProposal]:
+        """Remove e retorna a proposta pendente do usuário."""
+        return self._pending_proposals.pop(user_id, None)
+
+    @staticmethod
+    def is_affirmative(text: str) -> bool:
+        """Verifica se o texto contém palavras afirmativas em português brasileiro."""
+        normalized = text.strip().lower()
+        affirmative_words = {
+            "sim", "s", "confirmo", "confirmado", "pode", "pode agendar",
+            "pode criar", "pode sim", "beleza", "fechado", "fechou", "ok",
+            "com certeza", "isso", "isso mesmo", "positivo", "vai fundo",
+            "manda ver", "atualiza", "atualizar", "remarca", "remarcar",
+        }
+        if normalized in affirmative_words:
+            return True
+        return any(phrase in normalized for phrase in ["pode agendar", "pode sim", "isso mesmo", "com certeza"])
+
+    @staticmethod
+    def is_negative(text: str) -> bool:
+        """Verifica se o texto contém palavras de negação ou recusa em português brasileiro."""
+        normalized = text.strip().lower()
+        negative_words = {
+            "não", "nao", "n", "cancela", "cancelar", "deixa quieto",
+            "deixa pra lá", "esquece", "não quero", "nao quero", "nem pensar",
+            "deixa", "parar", "abortar",
+        }
+        if normalized in negative_words:
+            return True
+        return any(phrase in normalized for phrase in ["deixa quieto", "deixa pra lá", "não quero", "nao quero"])
+
+    def evaluate_response(
+        self,
+        user_id: int,
+        raw_text: str,
+        ai_confirmation_flag: Optional[str] = None,
+    ) -> tuple[ResponseDisposition, Optional[PendingProposal]]:
+        """Avalia se a mensagem do usuário é uma confirmação, negação ou nova instrução."""
+        pending = self.get_pending(user_id)
+        if not pending:
+            return ResponseDisposition.NO_PENDING, None
+
+        # Prioriza classificação estruturada pela IA se fornecida
+        if ai_confirmation_flag == "confirmed":
+            self.clear_pending(user_id)
+            return ResponseDisposition.CONFIRMED, pending
+
+        if ai_confirmation_flag == "denied":
+            self.clear_pending(user_id)
+            return ResponseDisposition.DENIED, pending
+
+        # Análise heurística das palavras em português
+        if self.is_affirmative(raw_text):
+            self.clear_pending(user_id)
+            return ResponseDisposition.CONFIRMED, pending
+
+        if self.is_negative(raw_text):
+            self.clear_pending(user_id)
+            return ResponseDisposition.DENIED, pending
+
+        # Caso não seja claramente sim/não, mantém o estado e trata como nova entrada
+        return ResponseDisposition.NEW_INPUT, pending
