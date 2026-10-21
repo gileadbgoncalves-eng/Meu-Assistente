@@ -34,6 +34,14 @@ class ConflictDetector:
         return dt.strftime("%Hh%M")
 
     @classmethod
+    def normalize_tz(cls, dt: datetime, default_tz_name: str = "America/Sao_Paulo") -> datetime:
+        """Garante que o datetime possua fuso horário associado."""
+        if dt.tzinfo is None:
+            from zoneinfo import ZoneInfo
+            return dt.replace(tzinfo=ZoneInfo(default_tz_name))
+        return dt
+
+    @classmethod
     def check_overlap(
         cls,
         start_a: datetime,
@@ -42,7 +50,11 @@ class ConflictDetector:
         end_b: datetime,
     ) -> bool:
         """Verifica se dois intervalos semiabertos [start, end) colidem matematicamente."""
-        return (start_a < end_b) and (end_a > start_b)
+        sa = cls.normalize_tz(start_a)
+        ea = cls.normalize_tz(end_a)
+        sb = cls.normalize_tz(start_b)
+        eb = cls.normalize_tz(end_b)
+        return (sa < eb) and (ea > sb)
 
     @classmethod
     def analyze_conflicts(
