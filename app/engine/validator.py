@@ -25,6 +25,12 @@ class ValidatedProposal(BaseModel):
     clarification_questions: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
 
+    # Campos do subsistema de lembretes
+    reminder_minutes_before: Optional[int] = None
+    reminder_trigger_datetime: Optional[datetime] = None
+    reminder_message: Optional[str] = None
+
+
 
 class DeterministicValidator:
     """Validador estrito de datas, fusos e regras lógicas de agendamento."""
@@ -137,6 +143,11 @@ class DeterministicValidator:
                 for p in interpretation.participants
             ]
 
+            # Tratamento de lembrete vinculado ao compromisso
+            reminder_trigger = cls.parse_datetime_with_timezone(
+                interpretation.reminder_trigger_datetime, user_timezone
+            )
+
             return ValidatedProposal(
                 is_valid=True,
                 intent=interpretation.intent,
@@ -148,6 +159,36 @@ class DeterministicValidator:
                 participants=participants_data,
                 duration_inferred=duration_inferred,
                 clarification_questions=clarification_questions,
+                reminder_minutes_before=interpretation.reminder_minutes_before,
+                reminder_trigger_datetime=reminder_trigger,
+                reminder_message=interpretation.reminder_message,
+            )
+
+        # Para solicitação de lembretes avulsos (REMINDER_REQUEST)
+        if interpretation.intent == IntentType.REMINDER_REQUEST:
+            reminder_trigger = cls.parse_datetime_with_timezone(
+                interpretation.reminder_trigger_datetime or interpretation.start_datetime,
+                user_timezone,
+            )
+
+            if not reminder_trigger:
+                clarification_questions.append("Para quando você gostaria de configurar esse lembrete?")
+                return ValidatedProposal(
+                    is_valid=False,
+                    intent=interpretation.intent,
+                    title=interpretation.reminder_message or interpretation.title or "Lembrete",
+                    needs_clarification=True,
+                    clarification_questions=clarification_questions,
+                    errors=["Horário de disparo do lembrete não informado."],
+                )
+
+            return ValidatedProposal(
+                is_valid=True,
+                intent=interpretation.intent,
+                title=interpretation.reminder_message or interpretation.title or "Lembrete",
+                timezone_name=user_timezone,
+                reminder_trigger_datetime=reminder_trigger,
+                reminder_message=interpretation.reminder_message or interpretation.title or "Lembrete",
             )
 
         # Para atualização ou cancelamento
@@ -166,4 +207,9 @@ class DeterministicValidator:
             participants=[p.model_dump() for p in interpretation.participants],
             needs_clarification=bool(clarification_questions),
             clarification_questions=clarification_questions,
+            reminder_minutes_before=interpretation.reminder_minutes_before,
+            reminder_trigger_datetime=cls.parse_datetime_with_timezone(
+                interpretation.reminder_trigger_datetime, user_timezone
+            ),
+            reminder_message=interpretation.reminder_message,
         )

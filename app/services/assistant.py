@@ -12,8 +12,9 @@ from app.db.repository import (
     EventRepository,
     IdempotencyRepository,
     ChangeLogRepository,
+    ReminderRepository,
 )
-from app.db.models import UserModel, EventModel
+from app.db.models import UserModel, EventModel, ReminderModel
 from app.ai.client import AIInterpreterProtocol, GeminiInterpreter
 from app.ai.schemas import AIInterpretationResult
 from app.engine.validator import DeterministicValidator, ValidatedProposal
@@ -43,6 +44,18 @@ class AssistantService:
         self.event_repo = EventRepository(session)
         self.idempotency_repo = IdempotencyRepository(session)
         self.changelog_repo = ChangeLogRepository(session)
+        self.reminder_repo = ReminderRepository(session)
+
+    @staticmethod
+    def _format_offset_br(minutes: int) -> str:
+        """Formata intervalo de antecedência: ex '1h', '2h', '15 minutos', '1 dia'."""
+        if minutes >= 1440 and minutes % 1440 == 0:
+            days = minutes // 1440
+            return f"{days} dia{'s' if days > 1 else ''}"
+        if minutes >= 60 and minutes % 60 == 0:
+            hours = minutes // 60
+            return f"{hours}h"
+        return f"{minutes} minutos"
 
     @staticmethod
     def _format_date_br(dt: datetime) -> str:
@@ -58,6 +71,7 @@ class AssistantService:
         }
         dia_nome = dias_semana.get(dt.weekday(), "")
         return f"{dia_nome}, {dt.strftime('%d/%m/%Y')}"
+
 
     @staticmethod
     def _format_time_br(dt: datetime) -> str:
@@ -146,6 +160,9 @@ class AssistantService:
         if validated.intent == IntentType.CREATE_EVENT:
             return await self._handle_create_event(user, validated)
 
+        elif validated.intent == IntentType.REMINDER_REQUEST:
+            return await self._handle_reminder_request(user, validated, anchor_dt)
+
         elif validated.intent == IntentType.QUERY_EVENTS:
             return await self._handle_query_events(user, validated, anchor_dt)
 
@@ -162,7 +179,7 @@ class AssistantService:
         )
 
     async def _handle_create_event(self, user: UserModel, proposal: ValidatedProposal) -> str:
-        """Processa intenção de criar evento com verificação de conflitos."""
+        """Processa intenção de criar evento com verificação de conflitos e agendamento de lembrete."""
         assert proposal.start_time is not None
         assert proposal.end_time is not None
 
@@ -190,6 +207,7 @@ class AssistantService:
                     "timezone": proposal.timezone_name,
                     "location_address": proposal.location_address,
                     "participants": proposal.participants,
+                    "reminder_minutes_before": proposal.reminder_minutes_before,
                 },
                 summary=f"Criar '{proposal.title}' em {self._format_date_br(proposal.start_time)}",
             )
@@ -208,6 +226,27 @@ class AssistantService:
             status=EventStatus.CONFIRMED.value,
         )
 
+        # Lembrete Automático / Customizado
+        reminder_minutes = (
+            proposal.reminder_minutes_before
+            if proposal.reminder_minutes_before is not None
+            else getattr(user, "default_reminder_minutes", 60)
+        )
+        reminder_str = ""
+        if reminder_minutes > 0:
+            reminder_send_at = event.start_time - timedelta(minutes=reminder_minutes)
+            reminder = await self.reminder_repo.create_reminder(
+                owner_user_id=user.id,
+                event_id=event.id,
+                recipient_phone=user.phone_number,
+                message_text=f"Lembrete: {event.title} às {self._format_time_br(event.start_time)}",
+                send_at=reminder_send_at,
+            )
+            rem_d = self._format_date_br(reminder.send_at)
+            rem_h = self._format_time_br(reminder.send_at)
+            offset_desc = self._format_offset_br(reminder_minutes)
+            reminder_str = f"\n🔔 Lembrete configurado para {rem_d} às {rem_h} ({offset_desc} antes)."
+
         date_str = self._format_date_br(event.start_time)
         start_str = self._format_time_br(event.start_time)
         end_str = self._format_time_br(event.end_time)
@@ -224,7 +263,33 @@ class AssistantService:
             f"✅ Compromisso agendado com sucesso!\n"
             f"📌 {event.title}\n"
             f"📅 {date_str}, das {start_str} às {end_str}{loc_str}"
-            f"{participants_str}{inferred_note}"
+            f"{participants_str}{reminder_str}{inferred_note}"
+        )
+
+    async def _handle_reminder_request(
+        self,
+        user: UserModel,
+        proposal: ValidatedProposal,
+        anchor_dt: datetime,
+    ) -> str:
+        """Processa pedidos de lembrete avulso ou independente."""
+        trigger_dt = proposal.reminder_trigger_datetime or (anchor_dt + timedelta(hours=1))
+        msg = proposal.reminder_message or proposal.title or "Lembrete"
+
+        reminder = await self.reminder_repo.create_reminder(
+            owner_user_id=user.id,
+            recipient_phone=user.phone_number,
+            message_text=msg,
+            send_at=trigger_dt,
+        )
+
+        d_str = self._format_date_br(reminder.send_at)
+        h_str = self._format_time_br(reminder.send_at)
+
+        return (
+            f"🔔 Lembrete agendado com sucesso!\n"
+            f"📌 {reminder.message_text}\n"
+            f"⏰ Disparo programado para {d_str} às {h_str}."
         )
 
     async def _handle_query_events(
@@ -369,10 +434,31 @@ class AssistantService:
                 participants_data=proposal.data.get("participants"),
                 status=EventStatus.CONFIRMED.value,
             )
+            reminder_minutes = (
+                proposal.data.get("reminder_minutes_before")
+                if proposal.data.get("reminder_minutes_before") is not None
+                else getattr(user, "default_reminder_minutes", 60)
+            )
+            reminder_str = ""
+            if reminder_minutes > 0:
+                reminder_send_at = event.start_time - timedelta(minutes=reminder_minutes)
+                reminder = await self.reminder_repo.create_reminder(
+                    owner_user_id=user.id,
+                    event_id=event.id,
+                    recipient_phone=user.phone_number,
+                    message_text=f"Lembrete: {event.title} às {self._format_time_br(event.start_time)}",
+                    send_at=reminder_send_at,
+                )
+                rem_d = self._format_date_br(reminder.send_at)
+                rem_h = self._format_time_br(reminder.send_at)
+                offset_desc = self._format_offset_br(reminder_minutes)
+                reminder_str = f"\n🔔 Lembrete configurado para {rem_d} às {rem_h} ({offset_desc} antes)."
+
             d_str = self._format_date_br(event.start_time)
             h_start = self._format_time_br(event.start_time)
             h_end = self._format_time_br(event.end_time)
-            return f"✅ Confirmado! Compromisso '{event.title}' agendado para {d_str}, das {h_start} às {h_end}."
+            return f"✅ Confirmado! Compromisso '{event.title}' agendado para {d_str}, das {h_start} às {h_end}.{reminder_str}"
+
 
         elif proposal.action_type == ActionType.UPDATE:
             assert proposal.target_event_id is not None

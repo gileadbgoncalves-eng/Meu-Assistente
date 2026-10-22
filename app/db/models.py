@@ -41,11 +41,14 @@ class UserModel(Base):
     timezone: Mapped[str] = mapped_column(String(64), default="America/Sao_Paulo", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default=UserStatus.ACTIVE.value, nullable=False)
     consent_given: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    default_reminder_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     # Relacionamentos
     events: Mapped[list["EventModel"]] = relationship("EventModel", back_populates="owner", cascade="all, delete-orphan")
     contacts: Mapped[list["ContactModel"]] = relationship("ContactModel", back_populates="owner", cascade="all, delete-orphan")
+    reminders: Mapped[list["ReminderModel"]] = relationship("ReminderModel", back_populates="owner", cascade="all, delete-orphan")
+
 
 
 class ContactModel(Base):
@@ -111,6 +114,12 @@ class EventModel(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    reminders: Mapped[list["ReminderModel"]] = relationship(
+        "ReminderModel",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     __table_args__ = (
         # Índice composto para consultas rápidas de conflito de agenda por usuário
@@ -152,16 +161,23 @@ class AvailabilityRuleModel(Base):
 
 
 class ReminderModel(Base):
-    """Lembretes agendados para eventos."""
+    """Lembretes agendados para eventos ou avulsos."""
     __tablename__ = "reminders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), index=True, nullable=False)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    event_id: Mapped[Optional[int]] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), index=True, nullable=True)
     recipient_phone: Mapped[str] = mapped_column(String(32), nullable=False)
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
     send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
+    channel: Mapped[str] = mapped_column(String(32), default="whatsapp", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
-    consent_given: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    consent_given: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    owner: Mapped["UserModel"] = relationship("UserModel", back_populates="reminders")
+    event: Mapped[Optional["EventModel"]] = relationship("EventModel", back_populates="reminders")
+
 
 
 class ChangeLogModel(Base):

@@ -23,6 +23,9 @@ from app.ai.schemas import AIInterpretationResult
 from app.domain.enums import IntentType, ConfidenceLevel
 
 
+import re
+
+
 class OfflineSimulatorMock(AIInterpreterProtocol):
     """Interpretador heurístico offline para testar o CLI mesmo sem conexão com a internet."""
 
@@ -35,32 +38,78 @@ class OfflineSimulatorMock(AIInterpreterProtocol):
     ) -> AIInterpretationResult:
         text = raw_message.lower().strip()
 
-        # Resposta afirmativa direta
-        if text in {"sim", "confirmo", "pode agendar", "beleza", "fechado"}:
+        # 1. Resposta afirmativa direta
+        if text in {"sim", "confirmo", "pode agendar", "beleza", "fechado", "pode sim", "isso"}:
             return AIInterpretationResult(
                 intent=IntentType.CREATE_EVENT,
                 is_confirmation_or_denial="confirmed",
                 confidence=ConfidenceLevel.HIGH,
             )
 
-        # Resposta negativa direta
-        if text in {"não", "nao", "cancela", "deixa quieto", "esquece"}:
+        # 2. Resposta negativa direta
+        if text in {"não", "nao", "cancela", "deixa quieto", "esquece", "não quero", "nao quero"}:
             return AIInterpretationResult(
                 intent=IntentType.UNKNOWN,
                 is_confirmation_or_denial="denied",
                 confidence=ConfidenceLevel.HIGH,
             )
 
-        # Consulta
-        if any(w in text for w in ["o que tenho", "compromissos", "agenda", "o que tem", "tenho hoje", "tenho amanhã"]):
+        # 3. Lembretes avulsos / independentes (ex: "me lembra de tomar remédio daqui a 1h")
+        standalone_rem_match = re.search(
+            r"(?:lembr\w*\s+de|avisa\w*\s+para)\s+(.+?)(?:\s+daqui\s+a\s+(\d+)\s*(h|horas?|minutos?|min))?$",
+            text,
+        )
+        if standalone_rem_match and not any(k in text for k in ["dia", "às", "as", "reunião", "consulta", "médico", "dentista"]):
+            rem_title = standalone_rem_match.group(1).strip().capitalize()
+            qty = int(standalone_rem_match.group(2)) if standalone_rem_match.group(2) else 1
+            unit = standalone_rem_match.group(3) or "h"
+            delta = timedelta(hours=qty) if "h" in unit else timedelta(minutes=qty)
+            trigger_dt = anchor_datetime + delta
+            return AIInterpretationResult(
+                intent=IntentType.REMINDER_REQUEST,
+                title=rem_title,
+                reminder_message=rem_title,
+                reminder_trigger_datetime=trigger_dt.isoformat(),
+                confidence=ConfidenceLevel.HIGH,
+            )
+
+        # 4. Intenção pura de agendamento sem dados (ex: "AGENDAR COMPROMISSO", "quero agendar um compromisso")
+        is_schedule_keyword = any(
+            cmd in text for cmd in [
+                "agendar compromisso", "marcar compromisso", "agendar reuniao", "agendar reunião",
+                "quero agendar", "preciso agendar", "quero marcar", "preciso marcar"
+            ]
+        ) or text in ["agendar", "marcar", "novo compromisso", "novo evento"]
+
+        has_any_time_or_date = bool(
+            re.search(r"\d{1,2}|amanh[ãa]|hoje|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo", text)
+        )
+
+        if is_schedule_keyword and not has_any_time_or_date:
+            return AIInterpretationResult(
+                intent=IntentType.CREATE_EVENT,
+                title=None,
+                start_datetime=None,
+                missing_fields=["título/assunto", "data", "horário de início"],
+                ambiguity_questions=["O que você gostaria de agendar e para qual data e horário?"],
+                confidence=ConfidenceLevel.HIGH,
+            )
+
+        # 5. Consulta real de agenda (evita bater em 'agendar' pelo uso de palavras estritas)
+        query_patterns = [
+            "o que tenho", "meus compromissos", "ver agenda", "minha agenda",
+            "consultar agenda", "quais compromissos", "o que tem", "tenho hoje",
+            "tenho amanhã", "tenho amanha", "agenda de hoje", "agenda de amanhã"
+        ]
+        if any(qp in text for qp in query_patterns):
             return AIInterpretationResult(
                 intent=IntentType.QUERY_EVENTS,
                 start_datetime=anchor_datetime.isoformat(),
                 confidence=ConfidenceLevel.HIGH,
             )
 
-        # Cancelamento
-        if "cancelar" in text or "cancela" in text:
+        # 6. Cancelamento
+        if text.startswith("cancelar") or text.startswith("cancela"):
             parts = text.replace("cancelar", "").replace("cancela", "").strip()
             return AIInterpretationResult(
                 intent=IntentType.CANCEL_EVENT,
@@ -68,34 +117,109 @@ class OfflineSimulatorMock(AIInterpreterProtocol):
                 confidence=ConfidenceLevel.HIGH,
             )
 
-        # Criação simples heurística
+        # 7. Criação de Evento com parsing rigoroso de data e hora brasileiros
         title = "Compromisso"
         if "dentista" in text:
             title = "Consulta com Dentista"
-        elif "reunião" in text or "reuniao" in text:
-            title = "Reunião de Trabalho"
         elif "médico" in text or "medico" in text:
             title = "Consulta Médica"
+        elif "reunião" in text or "reuniao" in text:
+            title = "Reunião de Trabalho"
         elif "almoço" in text or "almoco" in text:
             title = "Almoço"
 
-        # Detecta amanhã ou hoje
-        target_date = anchor_datetime
-        if "amanhã" in text or "amanha" in text:
-            target_date = anchor_datetime + timedelta(days=1)
+        # Parsing de Data
+        target_date = None
+        # Data DD/MM/AAAA
+        m_date_full = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", text)
+        if m_date_full:
+            day, month, year = int(m_date_full.group(1)), int(m_date_full.group(2)), int(m_date_full.group(3))
+            target_date = anchor_datetime.replace(year=year, month=month, day=day)
+        else:
+            # Data DD/MM
+            m_date_short = re.search(r"(\d{1,2})/(\d{1,2})", text)
+            if m_date_short:
+                day, month = int(m_date_short.group(1)), int(m_date_short.group(2))
+                target_date = anchor_datetime.replace(month=month, day=day)
+            elif "amanhã" in text or "amanha" in text:
+                target_date = anchor_datetime + timedelta(days=1)
+            elif "hoje" in text:
+                target_date = anchor_datetime
+            else:
+                m_dia = re.search(r"dia\s+(\d{1,2})", text)
+                if m_dia:
+                    target_date = anchor_datetime.replace(day=int(m_dia.group(1)))
 
-        # Detecta horário simples
-        hour = 14
-        if "15h" in text or "às 15" in text:
-            hour = 15
-        elif "10h" in text or "às 10" in text:
-            hour = 10
-        elif "12h" in text or "ao meio-dia" in text or "meio dia" in text:
-            hour = 12
-        elif "16h" in text or "às 16" in text:
-            hour = 16
+        # Parsing de Horário
+        hour = None
+        minute = 0
+        # Ex: "07:00 da manhã", "14:30", "07:00"
+        m_time_colon = re.search(r"(\d{1,2}):(\d{2})(?:\s*(da manhã|da tarde|da noite))?", text)
+        if m_time_colon:
+            h = int(m_time_colon.group(1))
+            minute = int(m_time_colon.group(2))
+            period = m_time_colon.group(3)
+            if period in {"da tarde", "da noite"} and h < 12:
+                h += 12
+            elif period == "da manhã" and h == 12:
+                h = 0
+            hour = h
+        else:
+            # Ex: "15h", "14h30", "7h"
+            m_time_h = re.search(r"(\d{1,2})h(\d{2})?(?:\s*(da manhã|da tarde|da noite))?", text)
+            if m_time_h:
+                h = int(m_time_h.group(1))
+                minute = int(m_time_h.group(2)) if m_time_h.group(2) else 0
+                period = m_time_h.group(3)
+                if period in {"da tarde", "da noite"} and h < 12:
+                    h += 12
+                hour = h
+            else:
+                # Ex: "às 7 da manhã", "às 14", "as 15"
+                m_as = re.search(r"[àa]s\s+(\d{1,2})(?:\s*(da manhã|da tarde|da noite))?", text)
+                if m_as:
+                    h = int(m_as.group(1))
+                    period = m_as.group(2)
+                    if period in {"da tarde", "da noite"} and h < 12:
+                        h += 12
+                    hour = h
 
-        start_dt = target_date.replace(hour=hour, minute=0, second=0, microsecond=0)
+        # Parsing de Lembrete relativo (ex: "me lembra 2h antes", "avisa 15 minutos antes")
+        reminder_minutes_before = None
+        m_rem = re.search(r"(?:lembr\w*|avisa\w*)\s+(\d+)\s*(h|horas?|minutos?|min|dias?|dia)\s+antes", text)
+        if m_rem:
+            val = int(m_rem.group(1))
+            unit = m_rem.group(2)
+            if "dia" in unit:
+                reminder_minutes_before = val * 1440
+            elif "h" in unit:
+                reminder_minutes_before = val * 60
+            else:
+                reminder_minutes_before = val
+
+        # Se faltou horário ou data, preenche missing_fields
+        missing_fields = []
+        ambiguity_questions = []
+
+        if target_date is None:
+            missing_fields.append("data")
+            ambiguity_questions.append(f"Para qual data você gostaria de agendar {title.lower()}?")
+        if hour is None:
+            missing_fields.append("horário de início")
+            ambiguity_questions.append(f"Qual é o horário para {title.lower()}?")
+
+        if missing_fields:
+            start_iso = target_date.strftime("%Y-%m-%d") if target_date else None
+            return AIInterpretationResult(
+                intent=IntentType.CREATE_EVENT,
+                title=title,
+                start_datetime=start_iso,
+                missing_fields=missing_fields,
+                ambiguity_questions=ambiguity_questions,
+                confidence=ConfidenceLevel.MEDIUM,
+            )
+
+        start_dt = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
         end_dt = start_dt + timedelta(hours=1)
 
         return AIInterpretationResult(
@@ -103,9 +227,11 @@ class OfflineSimulatorMock(AIInterpreterProtocol):
             title=title,
             start_datetime=start_dt.isoformat(),
             end_datetime=end_dt.isoformat(),
+            reminder_minutes_before=reminder_minutes_before,
             extracted_facts=[raw_message],
             confidence=ConfidenceLevel.HIGH,
         )
+
 
 
 BANNER = """
@@ -118,6 +244,7 @@ BANNER = """
 --------------------------------------------------------------------------------
  COMANDOS RÁPIDOS:
    /agenda     -> Visualizar todos os compromissos salvos no banco
+   /lembretes  -> Visualizar todos os lembretes configurados
    /auditoria  -> Ver o histórico append-only de alterações (change_log)
    /limpar     -> Resetar propostas pendentes e limpar memória da conversa
    /ajuda      -> Exibir esta lista de comandos
@@ -198,6 +325,23 @@ async def run_simulator(mock_mode: bool = False, phone: str = "5511999998888", u
                         status_emoji = "✅" if ev.status == "confirmed" else ("⏳" if ev.status == "draft" else "❌")
                         loc = f" | Local: {ev.location.raw_address}" if ev.location else ""
                         print(f"  {status_emoji} [{ev.id}] {d_str} {h_start}-{h_end} - {ev.title} (Status: {ev.status}){loc}")
+            continue
+
+        elif user_input.lower() == "/lembretes":
+            async with async_session_factory() as session:
+                service = AssistantService(session=session)
+                user = await service.user_repo.get_or_create(phone, user_name)
+                reminders = await service.reminder_repo.list_by_user(user.id)
+
+                if not reminders:
+                    print("\n🔔 Nenhum lembrete configurado no momento.")
+                else:
+                    print(f"\n🔔 Lembretes configurados ({len(reminders)}):")
+                    for rem in reminders:
+                        trigger_str = rem.send_at.strftime("%d/%m/%Y às %Hh%M")
+                        status_badge = "⏳ [Pendente]" if rem.status == "pending" else f"[{rem.status}]"
+                        ev_info = f" (Evento #{rem.event_id})" if rem.event_id else " (Lembrete Avulso)"
+                        print(f"  • {status_badge} {trigger_str} - {rem.message_text}{ev_info}")
             continue
 
         elif user_input.lower() == "/auditoria":

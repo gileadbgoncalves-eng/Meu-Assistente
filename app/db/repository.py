@@ -14,6 +14,7 @@ from app.db.models import (
     ChangeLogModel,
     MessageProcessingModel,
     ContactModel,
+    ReminderModel,
 )
 from app.domain.enums import EventStatus, ActionType
 from app.domain.exceptions import (
@@ -341,3 +342,63 @@ class ChangeLogRepository:
         )
         result = await self.session.execute(query)
         return result.scalars().all()
+
+
+class ReminderRepository:
+    """Repositório de persistência e consulta de lembretes."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create_reminder(
+        self,
+        owner_user_id: int,
+        recipient_phone: str,
+        message_text: str,
+        send_at: datetime,
+        event_id: Optional[int] = None,
+        channel: str = "whatsapp",
+        status: str = "pending",
+        consent_given: bool = True,
+    ) -> ReminderModel:
+        """Cria e persiste um lembrete (avulso ou vinculado a evento)."""
+        reminder = ReminderModel(
+            owner_user_id=owner_user_id,
+            event_id=event_id,
+            recipient_phone=recipient_phone,
+            message_text=message_text,
+            send_at=send_at,
+            channel=channel,
+            status=status,
+            consent_given=consent_given,
+        )
+        self.session.add(reminder)
+        await self.session.flush()
+        return reminder
+
+    async def list_by_user(
+        self, owner_user_id: int, status: Optional[str] = None
+    ) -> Sequence[ReminderModel]:
+        """Lista lembretes de um usuário específico."""
+        conditions = [ReminderModel.owner_user_id == owner_user_id]
+        if status:
+            conditions.append(ReminderModel.status == status)
+
+        query = (
+            select(ReminderModel)
+            .where(and_(*conditions))
+            .order_by(ReminderModel.send_at.asc())
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def list_by_event(self, event_id: int) -> Sequence[ReminderModel]:
+        """Lista lembretes vinculados a um evento."""
+        query = (
+            select(ReminderModel)
+            .where(ReminderModel.event_id == event_id)
+            .order_by(ReminderModel.send_at.asc())
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all()
+

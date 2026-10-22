@@ -81,8 +81,15 @@ No terminal PowerShell, execute:
 > **Você digita**: `O que tenho amanhã?`  
 > **Resultado esperado**: O assistente lista os compromissos cadastrados para o dia seguinte de forma limpa.
 
+#### Cenário E: Lembretes Automáticos, Relativos e Avulsos
+> **Você digita**: `médico dia 30/10/2026 às 07:00 da manhã.`  
+> **Resultado esperado**: O assistente agenda na data e hora exatas com lembrete padrão (60 min antes): *"🔔 Lembrete configurado para 30/10 às 06h (1h antes)."*  
+> **Você digita**: `me lembra de tomar remédio daqui a 1h`  
+> **Resultado esperado**: O assistente confirma lembrete avulso com disparo daqui a 1 hora.
+
 ### 3. Comandos Utilitários no Terminal
 - `/agenda` → Exibe em formato tabular todos os eventos gravados no banco relacional.
+- `/lembretes` → Exibe todos os lembretes pendentes (avulsos ou vinculados a eventos).
 - `/auditoria` → Exibe os registros imutáveis de `change_log` comprovando que toda criação/atualização possui rastreabilidade.
 - `/limpar` → Reseta as propostas pendentes da conversa.
 - `/sair` → Finaliza a sessão do simulador.
@@ -105,7 +112,7 @@ Para receber mensagens reais via WhatsApp Cloud API (Meta for Developers):
 
 ## 🧪 Como Rodar a Suíte Completa de Testes
 
-A suíte possui **38 testes automatizados** cobrindo isolamento de usuários, regras de conflito, viradas de mês/ano, anos bissextos, mensagens ambíguas, injeção de prompt, idempotência, webhooks e adaptadores externos:
+A suíte possui **48 testes automatizados** cobrindo subsistema de lembretes, isolamento de usuários, regras de conflito, viradas de mês/ano, anos bissextos, mensagens ambíguas, injeção de prompt, idempotência, webhooks e adaptadores externos:
 
 ```powershell
 .\.venv\Scripts\pytest.exe -v

@@ -97,3 +97,18 @@ class AIInterpretationResult(BaseModel):
         default=None,
         description="Indica se a mensagem é uma resposta direta a confirmação anterior: 'confirmed', 'denied' ou null",
     )
+
+    # Subsistema de Lembretes (Reminders)
+    reminder_minutes_before: Optional[int] = Field(
+        default=None,
+        description="Minutos de antecedência do lembrete em relação ao início do compromisso (ex: 120 para 2h antes, 15 para 15min antes, 1440 para 1 dia antes)",
+    )
+    reminder_trigger_datetime: Optional[str] = Field(
+        default=None,
+        description="Data e horário absoluto de disparo do lembrete no formato ISO 8601 (para lembretes avulsos ou calculados)",
+    )
+    reminder_message: Optional[str] = Field(
+        default=None,
+        description="Descrição textual do lembrete (ex: 'Tomar remédio', 'Ligar para João')",
+    )
+
