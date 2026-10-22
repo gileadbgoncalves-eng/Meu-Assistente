@@ -1,14 +1,14 @@
 """Máquina de estados para gerenciamento de propostas pendentes e confirmações."""
 
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Optional
+from datetime import UTC, datetime
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
 
 from app.domain.enums import ActionType
 
 
-class ResponseDisposition(str, Enum):
+class ResponseDisposition(StrEnum):
     """Classificação da resposta do usuário frente a uma ação pendente."""
     CONFIRMED = "confirmed"     # Usuário aprovou a ação explicitamente ("sim", "pode agendar")
     DENIED = "denied"           # Usuário recusou a ação ("não", "cancela", "deixa quieto")
@@ -20,10 +20,10 @@ class PendingProposal(BaseModel):
     """Proposta mantida em memória aguardando confirmação do usuário."""
     user_id: int
     action_type: ActionType
-    target_event_id: Optional[int] = None
+    target_event_id: int | None = None
     data: dict = Field(default_factory=dict)
     summary: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ConversationStateManager:
@@ -41,7 +41,7 @@ class ConversationStateManager:
         """Registra o último compromisso criado ou manipulado na sessão."""
         self._last_event_ids[user_id] = event_id
 
-    def get_last_event_id(self, user_id: int) -> Optional[int]:
+    def get_last_event_id(self, user_id: int) -> int | None:
         """Recupera o ID do último compromisso associado à sessão do usuário."""
         return self._last_event_ids.get(user_id)
 
@@ -70,11 +70,11 @@ class ConversationStateManager:
         """Registra uma proposta pendente para o usuário."""
         self._pending_proposals[user_id] = proposal
 
-    def get_pending(self, user_id: int) -> Optional[PendingProposal]:
+    def get_pending(self, user_id: int) -> PendingProposal | None:
         """Obtém a proposta pendente do usuário, se houver."""
         return self._pending_proposals.get(user_id)
 
-    def clear_pending(self, user_id: int) -> Optional[PendingProposal]:
+    def clear_pending(self, user_id: int) -> PendingProposal | None:
         """Remove e retorna a proposta pendente do usuário."""
         return self._pending_proposals.pop(user_id, None)
 
@@ -115,8 +115,8 @@ class ConversationStateManager:
         self,
         user_id: int,
         raw_text: str,
-        ai_confirmation_flag: Optional[str] = None,
-    ) -> tuple[ResponseDisposition, Optional[PendingProposal]]:
+        ai_confirmation_flag: str | None = None,
+    ) -> tuple[ResponseDisposition, PendingProposal | None]:
         """Avalia se a mensagem do usuário é uma confirmação, negação ou nova instrução."""
         pending = self.get_pending(user_id)
         if not pending:

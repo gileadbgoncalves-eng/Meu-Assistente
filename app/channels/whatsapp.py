@@ -3,11 +3,12 @@
 import hashlib
 import hmac
 import logging
-from typing import Optional
+
 import httpx
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.domain.formatters import DataSanitizer
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class IncomingWhatsAppMessage(BaseModel):
     sender_name: str = Field(default="Usuário", description="Nome de exibição no WhatsApp se disponível")
     message_id: str = Field(description="Identificador único da mensagem atribuído pela Meta (wamid)")
     text: str = Field(description="Texto da mensagem enviada")
-    timestamp: Optional[str] = Field(default=None, description="Timestamp da mensagem")
+    timestamp: str | None = Field(default=None, description="Timestamp da mensagem")
 
 
 class WhatsAppClient:
@@ -26,17 +27,17 @@ class WhatsAppClient:
 
     def __init__(
         self,
-        access_token: Optional[str] = None,
-        phone_number_id: Optional[str] = None,
-        app_secret: Optional[str] = None,
-        api_version: Optional[str] = None,
+        access_token: str | None = None,
+        phone_number_id: str | None = None,
+        app_secret: str | None = None,
+        api_version: str | None = None,
     ):
         self.access_token = access_token or settings.WHATSAPP_ACCESS_TOKEN
         self.phone_number_id = phone_number_id or settings.WHATSAPP_PHONE_NUMBER_ID
         self.app_secret = app_secret or settings.WHATSAPP_APP_SECRET
         self.api_version = api_version or settings.WHATSAPP_API_VERSION
 
-    def verify_signature(self, payload_bytes: bytes, signature_header: Optional[str]) -> bool:
+    def verify_signature(self, payload_bytes: bytes, signature_header: str | None) -> bool:
         """Verifica a assinatura criptográfica X-Hub-Signature-256 enviada pela Meta."""
         if not self.app_secret:
             # Se não houver segredo configurado, aceita a mensagem (útil em testes locais)
@@ -112,11 +113,12 @@ class WhatsAppClient:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(url, headers=headers, json=body)
+                masked_phone = DataSanitizer.mask_phone(recipient_phone)
                 if response.status_code in (200, 201):
-                    logger.info("Mensagem enviada com sucesso para %s via WhatsApp API", recipient_phone)
+                    logger.info("Mensagem enviada com sucesso para %s via WhatsApp API", masked_phone)
                     return True
                 else:
-                    logger.error("Falha ao enviar mensagem pelo WhatsApp API: %s %s", response.status_code, response.text)
+                    logger.error("Falha ao enviar mensagem pelo WhatsApp API para %s: %s %s", masked_phone, response.status_code, response.text)
                     return False
         except Exception as exc:
             logger.error("Exceção ao comunicar com a WhatsApp Graph API: %s", exc)

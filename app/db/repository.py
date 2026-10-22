@@ -1,25 +1,24 @@
 """Camada de repositório assíncrono com SQLAlchemy 2.0 e isolamento de segurança."""
 
-from datetime import datetime, timezone
-from typing import Optional, Sequence
-from sqlalchemy import select, and_, or_
+from collections.abc import Sequence
+from datetime import datetime
+
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
-    UserModel,
+    ChangeLogModel,
     EventModel,
     EventParticipantModel,
     LocationModel,
-    ChangeLogModel,
     MessageProcessingModel,
-    ContactModel,
     ReminderModel,
+    UserModel,
 )
-from app.domain.enums import EventStatus, ActionType
+from app.domain.enums import ActionType, EventStatus, IdempotencyStatus
 from app.domain.exceptions import (
     EntityNotFoundError,
-    UnauthorizedAccessError,
     IdempotencyDuplicateError,
 )
 
@@ -30,13 +29,13 @@ class UserRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_by_id(self, user_id: int) -> Optional[UserModel]:
+    async def get_by_id(self, user_id: int) -> UserModel | None:
         result = await self.session.execute(
             select(UserModel).where(UserModel.id == user_id)
         )
         return result.scalar_one_or_none()
 
-    async def get_by_phone(self, phone_number: str) -> Optional[UserModel]:
+    async def get_by_phone(self, phone_number: str) -> UserModel | None:
         result = await self.session.execute(
             select(UserModel).where(UserModel.phone_number == phone_number)
         )
@@ -73,12 +72,12 @@ class EventRepository:
         start_time: datetime,
         end_time: datetime,
         timezone: str = "America/Sao_Paulo",
-        description: Optional[str] = None,
-        location_address: Optional[str] = None,
-        participants_data: Optional[list[dict]] = None,
+        description: str | None = None,
+        location_address: str | None = None,
+        participants_data: list[dict] | None = None,
         status: str = EventStatus.DRAFT.value,
         confidence_score: float = 1.0,
-        author_user_id: Optional[int] = None,
+        author_user_id: int | None = None,
     ) -> EventModel:
         author_id = author_user_id or owner_user_id
 
@@ -139,7 +138,7 @@ class EventRepository:
         # Recarrega o evento com os participantes
         return await self.get_by_id(event.id, owner_user_id=owner_user_id)  # type: ignore
 
-    async def get_by_id(self, event_id: int, owner_user_id: int) -> Optional[EventModel]:
+    async def get_by_id(self, event_id: int, owner_user_id: int) -> EventModel | None:
         """Busca evento garantindo isolamento: só retorna se pertencer ao owner_user_id."""
         query = (
             select(EventModel)
@@ -162,7 +161,7 @@ class EventRepository:
         owner_user_id: int,
         start_time: datetime,
         end_time: datetime,
-        exclude_event_id: Optional[int] = None,
+        exclude_event_id: int | None = None,
     ) -> Sequence[EventModel]:
         """Busca eventos confirmados ou rascunhos que se sobreponham ao intervalo informado."""
         filters = [
@@ -220,8 +219,8 @@ class EventRepository:
         event_id: int,
         owner_user_id: int,
         updates: dict,
-        author_user_id: Optional[int] = None,
-        reason: Optional[str] = None,
+        author_user_id: int | None = None,
+        reason: str | None = None,
     ) -> EventModel:
         """Atualiza campos de um evento e registra a mudança na trilha de auditoria."""
         event = await self.get_by_id(event_id, owner_user_id=owner_user_id)
@@ -258,8 +257,8 @@ class EventRepository:
         self,
         event_id: int,
         owner_user_id: int,
-        author_user_id: Optional[int] = None,
-        reason: Optional[str] = None,
+        author_user_id: int | None = None,
+        reason: str | None = None,
     ) -> EventModel:
         """Cancela um evento e registra o motivo no change_log."""
         return await self.update_event(
@@ -297,7 +296,7 @@ class IdempotencyRepository:
             idempotency_key=idempotency_key,
             user_id=user_id,
             raw_text=raw_text,
-            status="received",
+            status=IdempotencyStatus.RECEIVED.value,
         )
         self.session.add(record)
         await self.session.flush()
@@ -306,8 +305,8 @@ class IdempotencyRepository:
     async def update_status(
         self,
         idempotency_key: str,
-        status: str,
-        detected_intent: Optional[str] = None,
+        status: str | IdempotencyStatus,
+        detected_intent: str | None = None,
     ) -> None:
         query = select(MessageProcessingModel).where(
             MessageProcessingModel.idempotency_key == idempotency_key
@@ -315,7 +314,7 @@ class IdempotencyRepository:
         result = await self.session.execute(query)
         record = result.scalar_one_or_none()
         if record:
-            record.status = status
+            record.status = status.value if hasattr(status, "value") else str(status)
             if detected_intent:
                 record.detected_intent = detected_intent
             await self.session.flush()
@@ -356,7 +355,7 @@ class ReminderRepository:
         recipient_phone: str,
         message_text: str,
         send_at: datetime,
-        event_id: Optional[int] = None,
+        event_id: int | None = None,
         channel: str = "whatsapp",
         status: str = "pending",
         consent_given: bool = True,
@@ -377,7 +376,7 @@ class ReminderRepository:
         return reminder
 
     async def list_by_user(
-        self, owner_user_id: int, status: Optional[str] = None
+        self, owner_user_id: int, status: str | None = None
     ) -> Sequence[ReminderModel]:
         """Lista lembretes de um usuário específico."""
         conditions = [ReminderModel.owner_user_id == owner_user_id]

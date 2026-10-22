@@ -1,9 +1,9 @@
 """Esquemas Pydantic v2 para extração semântica estruturada via Gemini."""
 
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
-from app.domain.enums import IntentType, ConfidenceLevel, ParticipantRole
+from app.domain.enums import ConfidenceLevel, IntentType, ParticipantRole
 
 
 class ExtractedParticipant(BaseModel):
@@ -13,11 +13,11 @@ class ExtractedParticipant(BaseModel):
         default=ParticipantRole.ATTENDEE.value,
         description="Papel do participante: organizer, attendee ou guest",
     )
-    phone_number: Optional[str] = Field(
+    phone_number: str | None = Field(
         default=None,
         description="Número de telefone informado, se houver",
     )
-    replaces_name: Optional[str] = Field(
+    replaces_name: str | None = Field(
         default=None,
         description="Nome de quem este participante está substituindo, se aplicável",
     )
@@ -26,7 +26,7 @@ class ExtractedParticipant(BaseModel):
 class ProposedChange(BaseModel):
     """Mudança proposta em um compromisso existente."""
     field: str = Field(description="Nome do campo a ser alterado: title, start_time, end_time, location, participant")
-    old_value: Optional[str] = Field(default=None, description="Valor anterior inferido ou citado")
+    old_value: str | None = Field(default=None, description="Valor anterior inferido ou citado")
     new_value: str = Field(description="Novo valor proposto")
 
 
@@ -37,15 +37,15 @@ class AIInterpretationResult(BaseModel):
         default=IntentType.UNKNOWN,
         description="Intenção principal da mensagem: create_event, query_events, update_event, cancel_event, add_participant, replace_participant, reminder_request, unknown",
     )
-    title: Optional[str] = Field(
+    title: str | None = Field(
         default=None,
         description="Título ou assunto do evento (ex: 'Consulta com Dentista', 'Reunião de Alinhamento')",
     )
-    start_datetime: Optional[str] = Field(
+    start_datetime: str | None = Field(
         default=None,
         description="Data e horário de início resolvidos no formato ISO 8601 (ex: '2026-10-22T14:00:00')",
     )
-    end_datetime: Optional[str] = Field(
+    end_datetime: str | None = Field(
         default=None,
         description="Data e horário de término resolvidos no formato ISO 8601, se informados ou calculáveis",
     )
@@ -53,7 +53,7 @@ class AIInterpretationResult(BaseModel):
         default="America/Sao_Paulo",
         description="Fuso horário de referência",
     )
-    location_raw: Optional[str] = Field(
+    location_raw: str | None = Field(
         default=None,
         description="Endereço físico ou local mencionado textualmente",
     )
@@ -61,7 +61,7 @@ class AIInterpretationResult(BaseModel):
         default_factory=list,
         description="Lista de participantes identificados na mensagem",
     )
-    event_reference: Optional[str] = Field(
+    event_reference: str | None = Field(
         default=None,
         description="Referência textual a evento existente ao alterar ou cancelar (ex: 'reunião da escola do Bernardo')",
     )
@@ -89,25 +89,25 @@ class AIInterpretationResult(BaseModel):
         default=ConfidenceLevel.HIGH,
         description="Grau de certeza da interpretação: high, medium ou low",
     )
-    uncertainty_reason: Optional[str] = Field(
+    uncertainty_reason: str | None = Field(
         default=None,
         description="Motivo da incerteza ou ambiguidade quando confidence for medium ou low",
     )
-    is_confirmation_or_denial: Optional[str] = Field(
+    is_confirmation_or_denial: str | None = Field(
         default=None,
         description="Indica se a mensagem é uma resposta direta a confirmação anterior: 'confirmed', 'denied' ou null",
     )
 
     # Subsistema de Lembretes (Reminders)
-    reminder_minutes_before: Optional[int] = Field(
+    reminder_minutes_before: int | None = Field(
         default=None,
         description="Minutos de antecedência do lembrete em relação ao início do compromisso (ex: 120 para 2h antes, 15 para 15min antes, 1440 para 1 dia antes)",
     )
-    reminder_trigger_datetime: Optional[str] = Field(
+    reminder_trigger_datetime: str | None = Field(
         default=None,
         description="Data e horário absoluto de disparo do lembrete no formato ISO 8601 (para lembretes avulsos ou calculados)",
     )
-    reminder_message: Optional[str] = Field(
+    reminder_message: str | None = Field(
         default=None,
         description="Descrição textual do lembrete (ex: 'Tomar remédio', 'Ligar para João')",
     )

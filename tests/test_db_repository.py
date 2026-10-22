@@ -1,15 +1,16 @@
 """Testes automatizados da camada de persistência relacional e repositórios."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.db.repository import (
-    UserRepository,
+    ChangeLogRepository,
     EventRepository,
     IdempotencyRepository,
-    ChangeLogRepository,
+    UserRepository,
 )
-from app.domain.enums import EventStatus, ActionType
+from app.domain.enums import ActionType, EventStatus
 from app.domain.exceptions import IdempotencyDuplicateError
 
 
@@ -45,8 +46,8 @@ async def test_event_creation_with_participants_and_audit(db_session):
 
     user = await user_repo.get_or_create("5511999998888", "Bernardo Silva")
 
-    start = datetime(2026, 10, 22, 14, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 10, 22, 15, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 10, 22, 14, 0, tzinfo=UTC)
+    end = datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
 
     event = await event_repo.create_event(
         owner_user_id=user.id,
@@ -85,8 +86,8 @@ async def test_event_conflict_detection(db_session):
     user = await user_repo.get_or_create("5511999998888", "Bernardo Silva")
 
     # Evento base: 14:00 às 15:00
-    base_start = datetime(2026, 10, 22, 14, 0, tzinfo=timezone.utc)
-    base_end = datetime(2026, 10, 22, 15, 0, tzinfo=timezone.utc)
+    base_start = datetime(2026, 10, 22, 14, 0, tzinfo=UTC)
+    base_end = datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
     base_event = await event_repo.create_event(
         owner_user_id=user.id,
         title="Consulta Médica",
@@ -146,8 +147,8 @@ async def test_multiuser_security_isolation(db_session):
     user1 = await user_repo.get_or_create("5511999990001", "Usuário A")
     user2 = await user_repo.get_or_create("5511999990002", "Usuário B")
 
-    start = datetime(2026, 10, 22, 10, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 10, 22, 11, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 10, 22, 10, 0, tzinfo=UTC)
+    end = datetime(2026, 10, 22, 11, 0, tzinfo=UTC)
 
     # Usuário 1 cria evento
     event_user1 = await event_repo.create_event(
@@ -184,8 +185,8 @@ async def test_update_and_cancel_audit_trail(db_session):
     changelog_repo = ChangeLogRepository(db_session)
 
     user = await user_repo.get_or_create("5511999998888", "Bernardo Silva")
-    start = datetime(2026, 10, 22, 14, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 10, 22, 15, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 10, 22, 14, 0, tzinfo=UTC)
+    end = datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
 
     event = await event_repo.create_event(
         owner_user_id=user.id,
@@ -196,8 +197,8 @@ async def test_update_and_cancel_audit_trail(db_session):
     )
 
     # Atualiza título e status para confirmado
-    new_start = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
-    new_end = datetime(2026, 10, 24, 13, 0, tzinfo=timezone.utc)
+    new_start = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
+    new_end = datetime(2026, 10, 24, 13, 0, tzinfo=UTC)
     updated = await event_repo.update_event(
         event_id=event.id,
         owner_user_id=user.id,

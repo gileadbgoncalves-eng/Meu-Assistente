@@ -1,13 +1,13 @@
 """Suíte de testes de casos de borda (Edge Cases) para blindagem do sistema."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
 import pytest
 
-from app.engine.validator import DeterministicValidator
-from app.engine.conflict import ConflictDetector
 from app.ai.schemas import AIInterpretationResult
-from app.domain.enums import IntentType, ConfidenceLevel
+from app.domain.enums import ConfidenceLevel, IntentType
+from app.engine.validator import DeterministicValidator
 from app.services.assistant import AssistantService
 
 

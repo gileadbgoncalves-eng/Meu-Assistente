@@ -1,17 +1,15 @@
 """Testes para regressão das falhas de interpretação/data e subsistema de lembretes."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
+
 import pytest
 
-from app.channels.simulator import OfflineSimulatorMock
-from app.services.assistant import AssistantService
 from app.ai.schemas import AIInterpretationResult
-from app.domain.enums import IntentType, ConfidenceLevel, EventStatus
-from app.db.repository import ReminderRepository, EventRepository, UserRepository
-from app.engine.validator import DeterministicValidator
-from app.engine.state_machine import ConversationStateManager
-
+from app.channels.simulator import OfflineSimulatorMock
+from app.db.repository import EventRepository, ReminderRepository, UserRepository
+from app.domain.enums import ConfidenceLevel, IntentType
+from app.services.assistant import AssistantService
 
 # ==============================================================================
 # 1. TESTES DE REGRESSÃO: FALHAS OBSERVADAS NO SIMULADOR
@@ -275,7 +273,7 @@ async def test_reminder_repository_crud_and_link(db_session):
     )
 
     # Cria lembrete avulso
-    rem2 = await reminder_repo.create_reminder(
+    _ = await reminder_repo.create_reminder(
         owner_user_id=user.id,
         recipient_phone=user.phone_number,
         message_text="Pagar conta de luz",

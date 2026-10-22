@@ -2,16 +2,16 @@
 
 import json
 from datetime import datetime
-from typing import Optional, Protocol
-import anyio
+from typing import Protocol
 
+import anyio
 from google import genai
 from google.genai import types
 
-from app.config import settings
-from app.ai.schemas import AIInterpretationResult
 from app.ai.prompts import SYSTEM_PROMPT, build_user_prompt
-from app.domain.enums import IntentType, ConfidenceLevel
+from app.ai.schemas import AIInterpretationResult
+from app.config import settings
+from app.domain.enums import ConfidenceLevel, IntentType
 
 
 class AIInterpreterProtocol(Protocol):
@@ -22,7 +22,7 @@ class AIInterpreterProtocol(Protocol):
         raw_message: str,
         anchor_datetime: datetime,
         user_timezone: str = "America/Sao_Paulo",
-        recent_context: Optional[str] = None,
+        recent_context: str | None = None,
     ) -> AIInterpretationResult:
         """Interpreta uma mensagem e devolve o schema estruturado."""
         ...
@@ -33,12 +33,12 @@ class GeminiInterpreter:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        model_name: Optional[str] = None,
+        api_key: str | None = None,
+        model_name: str | None = None,
     ):
         self.api_key = api_key or settings.clean_gemini_api_key
         self.model_name = model_name or settings.GEMINI_MODEL
-        self._client: Optional[genai.Client] = None
+        self._client: genai.Client | None = None
 
     @property
     def client(self) -> genai.Client:
@@ -53,7 +53,7 @@ class GeminiInterpreter:
         raw_message: str,
         anchor_datetime: datetime,
         user_timezone: str = "America/Sao_Paulo",
-        recent_context: Optional[str] = None,
+        recent_context: str | None = None,
     ) -> AIInterpretationResult:
         """Envia mensagem ao Gemini solicitando retorno estruturado via response_schema."""
         prompt = build_user_prompt(
@@ -105,6 +105,6 @@ class GeminiInterpreter:
         return AIInterpretationResult(
             intent=IntentType.UNKNOWN,
             confidence=ConfidenceLevel.LOW,
-            uncertainty_reason=f"Falha na comunicação com o provedor de IA: {str(last_error)}",
+            uncertainty_reason=f"Falha na comunicação com o provedor de IA: {last_error!s}",
             ambiguity_questions=["Não consegui processar a mensagem no momento. Poderia repetir?"],
         )

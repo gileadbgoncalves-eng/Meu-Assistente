@@ -1,10 +1,11 @@
 """Testes do esquema estruturado de interpretação e mock do Gemini."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 import pytest
 
-from app.ai.schemas import AIInterpretationResult, ExtractedParticipant, ProposedChange
-from app.domain.enums import IntentType, ConfidenceLevel
+from app.ai.schemas import AIInterpretationResult
+from app.domain.enums import ConfidenceLevel, IntentType
 
 
 def test_ai_interpretation_schema_complete():
@@ -104,7 +105,7 @@ async def test_mock_gemini_interpreter(mock_interpreter):
     )
     mock_interpreter.set_response(predefined)
 
-    anchor = datetime(2026, 10, 21, 10, 0, tzinfo=timezone.utc)
+    anchor = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
     result = await mock_interpreter.interpret(
         raw_message="Almoço com cliente sexta às 12h30",
         anchor_datetime=anchor,

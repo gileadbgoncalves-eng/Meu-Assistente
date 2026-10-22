@@ -2,11 +2,11 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
+
 import httpx
 
 from app.config import settings
-from app.domain.interfaces import TravelTimeEstimatorPort, TravelEstimate
+from app.domain.interfaces import TravelEstimate, TravelTimeEstimatorPort
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class GoogleMapsAdapter(TravelTimeEstimatorPort):
     """Adaptador que implementa TravelTimeEstimatorPort usando a Distance Matrix API do Google Maps."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.GOOGLE_MAPS_API_KEY
 
     async def estimate_travel_time(

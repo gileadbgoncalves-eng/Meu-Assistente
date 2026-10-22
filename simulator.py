@@ -1,8 +1,8 @@
 """Atalho para iniciar o simulador interativo do Meu Assistente."""
 
-import sys
 from pathlib import Path
-from dotenv import load_dotenv, find_dotenv
+
+from dotenv import find_dotenv, load_dotenv
 
 # Carrega explicitamente o .env da raiz antes de qualquer importação
 ROOT_DIR = Path(__file__).resolve().parent
@@ -14,7 +14,7 @@ else:
     if found:
         load_dotenv(dotenv_path=found, override=True, encoding="utf-8-sig")
 
-from app.channels.simulator import main
+from app.channels.simulator import main  # noqa: E402
 
 if __name__ == "__main__":
     main()

@@ -1,14 +1,15 @@
 """Detector determinístico de conflitos e sobreposição de horários."""
 
+from collections.abc import Sequence
 from datetime import datetime
-from enum import Enum
-from typing import Sequence
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
 
 from app.db.models import EventModel
 
 
-class ConflictSeverity(str, Enum):
+class ConflictSeverity(StrEnum):
     """Gravidade do conflito identificado."""
     NONE = "none"
     ADJACENT = "adjacent"          # Evento colado (sem intervalo de descanso/deslocamento)

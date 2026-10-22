@@ -1,6 +1,7 @@
 """Gerenciador de sessões e conexão assíncrona com o banco de dados."""
 
 from collections.abc import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -14,7 +15,6 @@ from app.config import settings
 
 class Base(DeclarativeBase):
     """Classe base declarativa para todos os modelos ORM."""
-    pass
 
 
 def get_normalized_database_url(raw_url: str) -> str:

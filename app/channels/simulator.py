@@ -2,10 +2,10 @@
 
 import argparse
 import asyncio
-import os
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
 from sqlalchemy import select
 
 # Garante suporte a UTF-8 no terminal Windows
@@ -13,17 +13,16 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from app.config import settings
-from app.db.session import init_db, async_session_factory
-from app.db.models import EventModel, ChangeLogModel
-from app.services.assistant import AssistantService
-from app.engine.state_machine import ConversationStateManager
-from app.ai.client import GeminiInterpreter, AIInterpreterProtocol
-from app.ai.schemas import AIInterpretationResult
-from app.domain.enums import IntentType, ConfidenceLevel
-
-
 import re
+
+from app.ai.client import AIInterpreterProtocol, GeminiInterpreter
+from app.ai.schemas import AIInterpretationResult
+from app.config import settings
+from app.db.models import ChangeLogModel
+from app.db.session import async_session_factory, init_db
+from app.domain.enums import ConfidenceLevel, IntentType
+from app.engine.state_machine import ConversationStateManager
+from app.services.assistant import AssistantService
 
 
 class OfflineSimulatorMock(AIInterpreterProtocol):
@@ -147,7 +146,7 @@ class OfflineSimulatorMock(AIInterpreterProtocol):
             )
 
         # 6. Cancelamento
-        if text.startswith("cancelar") or text.startswith("cancela"):
+        if text.startswith(("cancelar", "cancela")):
             parts = text.replace("cancelar", "").replace("cancela", "").strip()
             return AIInterpretationResult(
                 intent=IntentType.CANCEL_EVENT,
@@ -428,7 +427,7 @@ async def run_simulator(mock_mode: bool = False, phone: str = "5511999998888", u
                 if not logs:
                     print("\n📜 Nenhuma entrada na trilha de auditoria ainda.")
                 else:
-                    print(f"\n📜 Últimos registros da trilha de auditoria (change_log):")
+                    print("\n📜 Últimos registros da trilha de auditoria (change_log):")
                     for log in logs:
                         dt_str = log.created_at.strftime("%d/%m %H:%M:%S")
                         print(f"  • [{dt_str}] Ação: {log.action.upper()} em {log.entity_name} #{log.entity_id} | Motivo: {log.reason}")

@@ -1,7 +1,7 @@
 """Configurações e fixtures para testes assíncronos com pytest."""
 
 from datetime import datetime
-from typing import Optional
+
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import (
@@ -10,16 +10,15 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.db.session import Base
 from app.ai.schemas import AIInterpretationResult
-from app.ai.client import AIInterpreterProtocol
-from app.domain.enums import IntentType, ConfidenceLevel
+from app.db.session import Base
+from app.domain.enums import ConfidenceLevel, IntentType
 
 
 class MockGeminiInterpreter:
     """Mock da camada de IA para testes rápidos, determinísticos e 100% offline."""
 
-    def __init__(self, predefined_response: Optional[AIInterpretationResult] = None):
+    def __init__(self, predefined_response: AIInterpretationResult | None = None):
         self.predefined_response = predefined_response
         self.call_history: list[dict] = []
 
@@ -31,7 +30,7 @@ class MockGeminiInterpreter:
         raw_message: str,
         anchor_datetime: datetime,
         user_timezone: str = "America/Sao_Paulo",
-        recent_context: Optional[str] = None,
+        recent_context: str | None = None,
     ) -> AIInterpretationResult:
         self.call_history.append({
             "raw_message": raw_message,

@@ -10,22 +10,22 @@ Executa uma verificação rápida (em ~2s) de todos os subsistemas:
 
 import asyncio
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Garante suporte a UTF-8 no terminal Windows
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from app.config import settings
-from app.db.session import Base
-from app.db.repository import UserRepository, EventRepository, ChangeLogRepository
-from app.domain.enums import EventStatus, IntentType, ConfidenceLevel
-from app.engine.validator import DeterministicValidator
-from app.engine.conflict import ConflictDetector, ConflictSeverity
 from app.ai.schemas import AIInterpretationResult
+from app.db.repository import ChangeLogRepository, EventRepository, UserRepository
+from app.db.session import Base
+from app.domain.enums import ConfidenceLevel, EventStatus, IntentType
+from app.engine.conflict import ConflictDetector
+from app.engine.validator import DeterministicValidator
 from app.main import app
 
 

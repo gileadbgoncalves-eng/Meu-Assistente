@@ -1,8 +1,8 @@
 """Validador determinístico de datas, fusos horários e integridade de propostas."""
 
 from datetime import datetime, timedelta
-from typing import Optional
 from zoneinfo import ZoneInfo
+
 from pydantic import BaseModel, Field
 
 from app.ai.schemas import AIInterpretationResult
@@ -13,22 +13,22 @@ class ValidatedProposal(BaseModel):
     """Proposta de evento validada pelo motor determinístico."""
     is_valid: bool
     intent: IntentType
-    title: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    title: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     timezone_name: str = "America/Sao_Paulo"
-    location_address: Optional[str] = None
+    location_address: str | None = None
     participants: list[dict] = Field(default_factory=list)
-    event_reference: Optional[str] = None
+    event_reference: str | None = None
     duration_inferred: bool = False
     needs_clarification: bool = False
     clarification_questions: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
 
     # Campos do subsistema de lembretes
-    reminder_minutes_before: Optional[int] = None
-    reminder_trigger_datetime: Optional[datetime] = None
-    reminder_message: Optional[str] = None
+    reminder_minutes_before: int | None = None
+    reminder_trigger_datetime: datetime | None = None
+    reminder_message: str | None = None
 
 
 
@@ -40,9 +40,9 @@ class DeterministicValidator:
     @classmethod
     def parse_datetime_with_timezone(
         cls,
-        dt_str: Optional[str],
+        dt_str: str | None,
         tz_name: str = "America/Sao_Paulo",
-    ) -> Optional[datetime]:
+    ) -> datetime | None:
         """Converte string ISO para datetime ciente do fuso horário especificado via zoneinfo."""
         if not dt_str:
             return None

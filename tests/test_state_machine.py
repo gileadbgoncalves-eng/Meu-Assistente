@@ -1,14 +1,12 @@
 """Testes da máquina de estados de propostas e confirmações conversacionais."""
 
-from datetime import datetime, timezone
-import pytest
 
+from app.domain.enums import ActionType
 from app.engine.state_machine import (
     ConversationStateManager,
     PendingProposal,
     ResponseDisposition,
 )
-from app.domain.enums import ActionType
 
 
 def test_state_machine_pending_lifecycle():

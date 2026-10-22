@@ -1,15 +1,16 @@
 """Modelos de banco de dados relacionais mapeados com SQLAlchemy 2.0."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
+
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Text,
 )
@@ -22,13 +23,12 @@ from app.domain.enums import (
     ParticipantStatus,
     SyncStatus,
     UserStatus,
-    ActionType,
 )
 
 
 def utc_now() -> datetime:
     """Retorna datetime UTC atual ciente de fuso horário."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class UserModel(Base):
@@ -58,9 +58,9 @@ class ContactModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
-    phone_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    external_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     owner: Mapped["UserModel"] = relationship("UserModel", back_populates="contacts")
@@ -72,10 +72,10 @@ class LocationModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     raw_address: Mapped[str] = mapped_column(Text, nullable=False)
-    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    place_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)  # Google Maps Place ID
-    arrival_instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    place_id: Mapped[str | None] = mapped_column(String(256), nullable=True)  # Google Maps Place ID
+    arrival_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
@@ -86,21 +86,21 @@ class EventModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), default="America/Sao_Paulo", nullable=False)
-    location_id: Mapped[Optional[int]] = mapped_column(ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default=EventStatus.DRAFT.value, index=True, nullable=False)
     confidence_score: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
 
     # Campos de integração externa (Google Agenda)
-    external_calendar_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    external_provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    external_calendar_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    external_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sync_status: Mapped[str] = mapped_column(String(32), default=SyncStatus.NOT_SYNCED.value, nullable=False)
 
     # Campos de integração futura com trânsito e rotas (Google Maps)
-    estimated_travel_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_travel_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
@@ -133,13 +133,13 @@ class EventParticipantModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), index=True, nullable=False)
-    contact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
-    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    phone_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
     role: Mapped[str] = mapped_column(String(32), default=ParticipantRole.ATTENDEE.value, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default=ParticipantStatus.PENDING.value, nullable=False)
-    replaces_participant_id: Mapped[Optional[int]] = mapped_column(
+    replaces_participant_id: Mapped[int | None] = mapped_column(
         ForeignKey("event_participants.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
@@ -166,7 +166,7 @@ class ReminderModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    event_id: Mapped[Optional[int]] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), index=True, nullable=True)
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), index=True, nullable=True)
     recipient_phone: Mapped[str] = mapped_column(String(32), nullable=False)
     message_text: Mapped[str] = mapped_column(Text, nullable=False)
     send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
@@ -189,9 +189,9 @@ class ChangeLogModel(Base):
     entity_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
     author_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     action: Mapped[str] = mapped_column(String(32), nullable=False)
-    previous_values: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    new_values: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    previous_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    new_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True, nullable=False)
 
 
@@ -203,6 +203,6 @@ class MessageProcessingModel(Base):
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
-    detected_intent: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    detected_intent: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="received", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

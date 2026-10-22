@@ -1,9 +1,9 @@
 """Adaptador para sincronização bidirecional com o Google Agenda (Google Calendar API)."""
 
 import logging
-from datetime import datetime
-from typing import Any, Optional
 import uuid
+from datetime import datetime
+from typing import Any
 
 from app.config import settings
 from app.domain.interfaces import CalendarSyncPort, ExternalCalendarEvent
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class GoogleCalendarAdapter(CalendarSyncPort):
     """Adaptador que implementa CalendarSyncPort para o Google Agenda."""
 
-    def __init__(self, credentials_file: Optional[str] = None):
+    def __init__(self, credentials_file: str | None = None):
         self.credentials_file = credentials_file or settings.GOOGLE_CALENDAR_CREDENTIALS_FILE
         self._is_authenticated = bool(self.credentials_file)
 

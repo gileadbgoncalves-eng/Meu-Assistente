@@ -2,7 +2,8 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -13,10 +14,10 @@ class TravelEstimate(BaseModel):
     departure_time: datetime
     mode: str = "driving"  # driving, transit, bicycling, walking
     duration_minutes: int
-    distance_meters: Optional[int] = None
+    distance_meters: int | None = None
     provider: str = "google_maps_platform"
     is_approximate: bool = True
-    warning: Optional[str] = None
+    warning: str | None = None
 
 
 class ExternalCalendarEvent(BaseModel):
@@ -24,11 +25,11 @@ class ExternalCalendarEvent(BaseModel):
     external_id: str
     provider: str = "google_calendar"
     summary: str
-    description: Optional[str] = None
+    description: str | None = None
     start_time: datetime
     end_time: datetime
-    location: Optional[str] = None
-    html_link: Optional[str] = None
+    location: str | None = None
+    html_link: str | None = None
 
 
 class CalendarSyncPort(ABC):
@@ -37,17 +38,14 @@ class CalendarSyncPort(ABC):
     @abstractmethod
     async def create_event(self, event_data: dict[str, Any]) -> ExternalCalendarEvent:
         """Cria evento no calendário externo."""
-        pass
 
     @abstractmethod
     async def update_event(self, external_id: str, event_data: dict[str, Any]) -> ExternalCalendarEvent:
         """Atualiza evento no calendário externo."""
-        pass
 
     @abstractmethod
     async def delete_event(self, external_id: str) -> bool:
         """Remove evento no calendário externo."""
-        pass
 
 
 class TravelTimeEstimatorPort(ABC):
@@ -62,7 +60,6 @@ class TravelTimeEstimatorPort(ABC):
         mode: str = "driving",
     ) -> TravelEstimate:
         """Calcula o tempo de viagem e distância prevista."""
-        pass
 
 
 class NotificationPort(ABC):
@@ -71,4 +68,3 @@ class NotificationPort(ABC):
     @abstractmethod
     async def send_message(self, recipient_id: str, message: str) -> bool:
         """Envia mensagem ao destinatário especificado."""
-        pass

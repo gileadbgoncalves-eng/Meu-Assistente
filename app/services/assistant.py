@@ -1,29 +1,30 @@
 """Serviço orquestrador do Meu Assistente (Pipeline de Conversa e Ações)."""
 
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.enums import EventStatus, ActionType, IntentType
-from app.domain.exceptions import IdempotencyDuplicateError
-from app.db.repository import (
-    UserRepository,
-    EventRepository,
-    IdempotencyRepository,
-    ChangeLogRepository,
-    ReminderRepository,
-)
-from app.db.models import UserModel, EventModel, ReminderModel
 from app.ai.client import AIInterpreterProtocol, GeminiInterpreter
 from app.ai.schemas import AIInterpretationResult
-from app.engine.validator import DeterministicValidator, ValidatedProposal
-from app.engine.conflict import ConflictDetector, ConflictSeverity
+from app.db.models import EventModel, UserModel
+from app.db.repository import (
+    ChangeLogRepository,
+    EventRepository,
+    IdempotencyRepository,
+    ReminderRepository,
+    UserRepository,
+)
+from app.domain.enums import ActionType, EventStatus, IdempotencyStatus, IntentType
+from app.domain.exceptions import IdempotencyDuplicateError
+from app.domain.formatters import BrazilianDateTimeFormatter
+from app.engine.conflict import ConflictDetector
 from app.engine.state_machine import (
     ConversationStateManager,
     PendingProposal,
     ResponseDisposition,
 )
+from app.engine.validator import DeterministicValidator, ValidatedProposal
 
 
 class AssistantService:
@@ -32,8 +33,8 @@ class AssistantService:
     def __init__(
         self,
         session: AsyncSession,
-        interpreter: Optional[AIInterpreterProtocol] = None,
-        state_manager: Optional[ConversationStateManager] = None,
+        interpreter: AIInterpreterProtocol | None = None,
+        state_manager: ConversationStateManager | None = None,
     ):
         self.session = session
         self.interpreter = interpreter or GeminiInterpreter()
@@ -49,44 +50,25 @@ class AssistantService:
     @staticmethod
     def _format_offset_br(minutes: int) -> str:
         """Formata intervalo de antecedência: ex '1h', '2h', '15 minutos', '1 dia'."""
-        if minutes >= 1440 and minutes % 1440 == 0:
-            days = minutes // 1440
-            return f"{days} dia{'s' if days > 1 else ''}"
-        if minutes >= 60 and minutes % 60 == 0:
-            hours = minutes // 60
-            return f"{hours}h"
-        return f"{minutes} minutos"
+        return BrazilianDateTimeFormatter.format_offset(minutes)
 
     @staticmethod
     def _format_date_br(dt: datetime) -> str:
         """Formata data no padrão brasileiro: ex 'Quinta-feira, 22/10/2026'."""
-        dias_semana = {
-            0: "Segunda-feira",
-            1: "Terça-feira",
-            2: "Quarta-feira",
-            3: "Quinta-feira",
-            4: "Sexta-feira",
-            5: "Sábado",
-            6: "Domingo",
-        }
-        dia_nome = dias_semana.get(dt.weekday(), "")
-        return f"{dia_nome}, {dt.strftime('%d/%m/%Y')}"
-
+        return BrazilianDateTimeFormatter.format_date(dt)
 
     @staticmethod
     def _format_time_br(dt: datetime) -> str:
         """Formata hora: 14h ou 14h30."""
-        if dt.minute == 0:
-            return dt.strftime("%Hh")
-        return dt.strftime("%Hh%M")
+        return BrazilianDateTimeFormatter.format_time(dt)
 
     async def process_message(
         self,
         phone_number: str,
         raw_text: str,
-        idempotency_key: Optional[str] = None,
+        idempotency_key: str | None = None,
         user_name: str = "Usuário",
-        anchor_datetime: Optional[datetime] = None,
+        anchor_datetime: datetime | None = None,
     ) -> str:
         """Processa a mensagem do usuário de ponta a ponta e devolve a resposta final."""
         # 1. Obter ou registrar usuário
@@ -126,13 +108,13 @@ class AssistantService:
 
             if disposition == ResponseDisposition.CONFIRMED and evaluated_proposal:
                 result_msg = await self._execute_pending_proposal(user, evaluated_proposal)
-                await self.idempotency_repo.update_status(msg_key, status="processed")
+                await self.idempotency_repo.update_status(msg_key, status=IdempotencyStatus.PROCESSED)
                 self.state_manager.add_history_message(user.id, role="user", text=raw_text)
                 self.state_manager.add_history_message(user.id, role="assistant", text=result_msg)
                 return result_msg
 
             elif disposition == ResponseDisposition.DENIED:
-                await self.idempotency_repo.update_status(msg_key, status="cancelled_by_user")
+                await self.idempotency_repo.update_status(msg_key, status=IdempotencyStatus.CANCELLED_BY_USER)
                 denied_msg = "Tudo bem, a proposta foi cancelada e nenhuma alteração foi feita na sua agenda."
                 self.state_manager.add_history_message(user.id, role="user", text=raw_text)
                 self.state_manager.add_history_message(user.id, role="assistant", text=denied_msg)
@@ -149,7 +131,7 @@ class AssistantService:
 
         await self.idempotency_repo.update_status(
             msg_key,
-            status="interpreted",
+            status=IdempotencyStatus.INTERPRETED,
             detected_intent=interpretation.intent.value,
         )
 
@@ -239,26 +221,12 @@ class AssistantService:
         )
         self.state_manager.set_last_event_id(user.id, event.id)
 
-        # Lembrete Automático / Customizado
-        reminder_minutes = (
-            proposal.reminder_minutes_before
-            if proposal.reminder_minutes_before is not None
-            else getattr(user, "default_reminder_minutes", 60)
+        # Lembrete Automático ou Customizado
+        reminder_str = await self._schedule_event_reminder(
+            user=user,
+            event=event,
+            reminder_minutes_before=proposal.reminder_minutes_before,
         )
-        reminder_str = ""
-        if reminder_minutes > 0:
-            reminder_send_at = event.start_time - timedelta(minutes=reminder_minutes)
-            reminder = await self.reminder_repo.create_reminder(
-                owner_user_id=user.id,
-                event_id=event.id,
-                recipient_phone=user.phone_number,
-                message_text=f"Lembrete: {event.title} às {self._format_time_br(event.start_time)}",
-                send_at=reminder_send_at,
-            )
-            rem_d = self._format_date_br(reminder.send_at)
-            rem_h = self._format_time_br(reminder.send_at)
-            offset_desc = self._format_offset_br(reminder_minutes)
-            reminder_str = f"\n🔔 Lembrete configurado para {rem_d} às {rem_h} ({offset_desc} antes)."
 
         date_str = self._format_date_br(event.start_time)
         start_str = self._format_time_br(event.start_time)
@@ -279,6 +247,34 @@ class AssistantService:
             f"{participants_str}{reminder_str}{inferred_note}"
         )
 
+    async def _schedule_event_reminder(
+        self,
+        user: UserModel,
+        event: EventModel,
+        reminder_minutes_before: int | None,
+    ) -> str:
+        """Agenda lembrete vinculado a um compromisso recém-criado."""
+        reminder_minutes = (
+            reminder_minutes_before
+            if reminder_minutes_before is not None
+            else getattr(user, "default_reminder_minutes", 60)
+        )
+        if reminder_minutes <= 0:
+            return ""
+
+        reminder_send_at = event.start_time - timedelta(minutes=reminder_minutes)
+        reminder = await self.reminder_repo.create_reminder(
+            owner_user_id=user.id,
+            event_id=event.id,
+            recipient_phone=user.phone_number,
+            message_text=f"Lembrete: {event.title} às {self._format_time_br(event.start_time)}",
+            send_at=reminder_send_at,
+        )
+        rem_d = self._format_date_br(reminder.send_at)
+        rem_h = self._format_time_br(reminder.send_at)
+        offset_desc = self._format_offset_br(reminder_minutes)
+        return f"\n🔔 Lembrete configurado para {rem_d} às {rem_h} ({offset_desc} antes)."
+
     async def _handle_reminder_request(
         self,
         user: UserModel,
@@ -294,7 +290,6 @@ class AssistantService:
             or ""
         )
 
-        # 1. Tenta vincular o lembrete a um evento existente (se houver referência anafórica ou tempo relativo)
         target_event = None
         is_relative_to_event = bool(
             proposal.reminder_minutes_before is not None
@@ -312,26 +307,43 @@ class AssistantService:
                 or interpretation.reminder_minutes_before
                 or getattr(user, "default_reminder_minutes", 60)
             )
-            trigger_dt = target_event.start_time - timedelta(minutes=minutes_before)
-            offset_text = self._format_offset_br(minutes_before)
-            msg = f"Lembrete: {target_event.title} às {self._format_time_br(target_event.start_time)}"
+            return await self._create_linked_reminder(user, target_event, minutes_before)
 
-            reminder = await self.reminder_repo.create_reminder(
-                owner_user_id=user.id,
-                event_id=target_event.id,
-                recipient_phone=user.phone_number,
-                message_text=msg,
-                send_at=trigger_dt,
-            )
+        return await self._create_standalone_reminder(user, proposal, anchor_dt)
 
-            d_str = self._format_date_br(reminder.send_at)
-            h_str = self._format_time_br(reminder.send_at)
-            return (
-                f"🔔 Lembrete configurado com sucesso para o compromisso '{target_event.title}'!\n"
-                f"📅 Disparo programado para {d_str} às {h_str} ({offset_text} antes do evento)."
-            )
+    async def _create_linked_reminder(
+        self,
+        user: UserModel,
+        target_event: EventModel,
+        minutes_before: int,
+    ) -> str:
+        """Cria e persiste um lembrete vinculado a um evento existente."""
+        trigger_dt = target_event.start_time - timedelta(minutes=minutes_before)
+        offset_text = self._format_offset_br(minutes_before)
+        msg = f"Lembrete: {target_event.title} às {self._format_time_br(target_event.start_time)}"
 
-        # 2. Lembrete avulso sem vínculo a evento
+        reminder = await self.reminder_repo.create_reminder(
+            owner_user_id=user.id,
+            event_id=target_event.id,
+            recipient_phone=user.phone_number,
+            message_text=msg,
+            send_at=trigger_dt,
+        )
+
+        d_str = self._format_date_br(reminder.send_at)
+        h_str = self._format_time_br(reminder.send_at)
+        return (
+            f"🔔 Lembrete configurado com sucesso para o compromisso '{target_event.title}'!\n"
+            f"📅 Disparo programado para {d_str} às {h_str} ({offset_text} antes do evento)."
+        )
+
+    async def _create_standalone_reminder(
+        self,
+        user: UserModel,
+        proposal: ValidatedProposal,
+        anchor_dt: datetime,
+    ) -> str:
+        """Cria e persiste um lembrete avulso não vinculado a eventos."""
         trigger_dt = proposal.reminder_trigger_datetime or (anchor_dt + timedelta(hours=1))
         msg = proposal.reminder_message or proposal.title or "Lembrete"
 
@@ -448,7 +460,7 @@ class AssistantService:
         user_id: int,
         reference: str | AIInterpretationResult,
         anchor_dt: datetime,
-    ) -> Optional[EventModel]:
+    ) -> EventModel | None:
         """Busca evento mais provável a partir de referências textuais ou do histórico de sessão."""
         if isinstance(reference, AIInterpretationResult):
             ref = (reference.event_reference or reference.title or "").strip().lower()
@@ -482,7 +494,7 @@ class AssistantService:
 
             # 4. Correspondência aproximada por palavras-chave
             stop_words = {"de", "para", "o", "a", "do", "da", "um", "uma", "com", "em", "no", "na", "esse", "essa", "desse", "dessa", "deste", "desta"}
-            ref_words = set(w for w in ref.split() if w not in stop_words)
+            ref_words = {w for w in ref.split() if w not in stop_words}
             if ref_words:
                 for ev in events:
                     ev_words = set(ev.title.lower().split())

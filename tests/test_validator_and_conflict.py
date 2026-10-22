@@ -1,14 +1,13 @@
 """Testes determinísticos para validação de datas, fusos horários e detecção de conflitos."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-import pytest
 
-from app.engine.validator import DeterministicValidator
-from app.engine.conflict import ConflictDetector, ConflictSeverity
 from app.ai.schemas import AIInterpretationResult
-from app.domain.enums import IntentType
 from app.db.models import EventModel
+from app.domain.enums import IntentType
+from app.engine.conflict import ConflictDetector, ConflictSeverity
+from app.engine.validator import DeterministicValidator
 
 
 def test_validator_with_zoneinfo_sao_paulo():

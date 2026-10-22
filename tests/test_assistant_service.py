@@ -1,14 +1,15 @@
 """Testes end-to-end do orquestrador AssistantService."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
 import pytest
 
-from app.services.assistant import AssistantService
-from app.engine.state_machine import ConversationStateManager
 from app.ai.schemas import AIInterpretationResult
-from app.domain.enums import IntentType, ConfidenceLevel, EventStatus
-from app.db.repository import EventRepository, ChangeLogRepository
+from app.db.repository import EventRepository
+from app.domain.enums import ConfidenceLevel, EventStatus, IntentType
+from app.engine.state_machine import ConversationStateManager
+from app.services.assistant import AssistantService
 
 
 @pytest.mark.asyncio
