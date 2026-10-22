@@ -25,7 +25,7 @@ class GoogleMapsAdapter(TravelTimeEstimatorPort):
         mode: str = "driving",
     ) -> TravelEstimate:
         """Calcula a estimativa de viagem e trânsito com suporte a fallback gracioso."""
-        if not self.api_key:
+        if not self.api_key or self.api_key in {"AIzaSy...", "sua_chave"}:
             # Fallback aproximado se a chave não estiver configurada
             logger.info("Chave do Google Maps não configurada. Usando estimativa aproximada de trânsito.")
             return TravelEstimate(

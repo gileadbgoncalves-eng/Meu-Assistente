@@ -262,12 +262,32 @@ async def run_simulator(mock_mode: bool = False, phone: str = "5511999998888", u
     now_str = datetime.now(user_tz).strftime("%d/%m/%Y %H:%M")
 
     # Seleciona o interpretador (Gemini Real ou Mock)
-    if mock_mode or not settings.GEMINI_API_KEY:
+    if mock_mode:
         interpreter = OfflineSimulatorMock()
-        mode_label = "🟡 MOCK HEURÍSTICO OFFLINE (Sem cota de API)"
+        mode_label = "🟡 MOCK HEURÍSTICO OFFLINE (Forçado via argumento --mock)"
     else:
-        interpreter = GeminiInterpreter()
-        mode_label = f"🟢 GEMINI REAL ({settings.GEMINI_MODEL})"
+        # Tenta obrigatoriamente a inicialização do GeminiInterpreter
+        gemini_key = settings.clean_gemini_api_key
+        if not gemini_key:
+            interpreter = OfflineSimulatorMock()
+            mode_label = "🟡 MOCK HEURÍSTICO OFFLINE (GEMINI_API_KEY não encontrada no .env)"
+            print("\n⚠️  [CONFIGURAÇÃO]: A variável 'GEMINI_API_KEY' não foi encontrada no arquivo .env.")
+            print(f"    Arquivo .env verificado em: {settings.model_config.get('env_file', '.env')}")
+            print("    Para utilizar o Gemini Real, configure GEMINI_API_KEY no arquivo .env.")
+            print("    Iniciando em modo de contingência Mock Heurístico Offline.\n")
+        else:
+            try:
+                real_interpreter = GeminiInterpreter(api_key=gemini_key)
+                # Valida a inicialização da SDK oficial
+                _ = real_interpreter.client
+                interpreter = real_interpreter
+                masked_key = f"{gemini_key[:6]}...{gemini_key[-4:]}" if len(gemini_key) > 10 else "***"
+                mode_label = f"🟢 GEMINI REAL ({settings.GEMINI_MODEL}) [Chave ativa: {masked_key}]"
+            except Exception as exc:
+                interpreter = OfflineSimulatorMock()
+                mode_label = f"🟡 MOCK HEURÍSTICO OFFLINE (Falha ao inicializar Gemini: {exc})"
+                print(f"\n❌ [ERRO AO INICIALIZAR GEMINI REAL]: {exc}")
+                print("    Alternando automaticamente para o Mock Heurístico Offline de contingência.\n")
 
     state_manager = ConversationStateManager()
 
@@ -383,6 +403,7 @@ async def run_simulator(mock_mode: bool = False, phone: str = "5511999998888", u
                 raw_text=user_input,
                 user_name=user_name,
             )
+            await session.commit()
             print(f"🤖 Assistente:\n{response}")
 
 

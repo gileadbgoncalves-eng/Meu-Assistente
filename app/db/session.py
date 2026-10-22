@@ -60,10 +60,52 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+def _sync_sqlite_schema(sync_conn) -> None:
+    """Para desenvolvimento local com SQLite, adiciona colunas ausentes em tabelas pré-existentes.
+    Mantém o PostgreSQL e os modelos de produção 100% intocados e puros.
+    """
+    if sync_conn.dialect.name != "sqlite":
+        return
+
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(sync_conn)
+    existing_tables = set(inspector.get_table_names())
+
+    for table_name, table in Base.metadata.tables.items():
+        if table_name in existing_tables:
+            existing_cols = {col["name"] for col in inspector.get_columns(table_name)}
+            for col in table.columns:
+                if col.name not in existing_cols:
+                    col_type = col.type.compile(sync_conn.dialect)
+                    default_clause = ""
+                    if col.default is not None and hasattr(col.default, "arg") and col.default.arg is not None:
+                        val = col.default.arg
+                        if isinstance(val, bool):
+                            default_clause = f" DEFAULT {1 if val else 0}"
+                        elif isinstance(val, (int, float)):
+                            default_clause = f" DEFAULT {val}"
+                        elif isinstance(val, str):
+                            default_clause = f" DEFAULT '{val}'"
+                    elif col.server_default is not None and hasattr(col.server_default, "arg"):
+                        default_clause = f" DEFAULT {col.server_default.arg}"
+                    elif not col.nullable:
+                        if "INT" in str(col_type).upper():
+                            default_clause = " DEFAULT 0"
+                        elif "CHAR" in str(col_type).upper() or "TEXT" in str(col_type).upper():
+                            default_clause = " DEFAULT ''"
+                        elif "BOOL" in str(col_type).upper():
+                            default_clause = " DEFAULT 0"
+                    sql = f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}{default_clause}"
+                    sync_conn.execute(text(sql))
+
+
 async def init_db() -> None:
-    """Cria todas as tabelas no banco de dados (útil para desenvolvimento local e testes)."""
+    """Cria todas as tabelas no banco de dados e compatibiliza colunas no SQLite local."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if engine.dialect.name == "sqlite":
+            await conn.run_sync(_sync_sqlite_schema)
 
 
 async def close_db() -> None:

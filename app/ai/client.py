@@ -36,7 +36,7 @@ class GeminiInterpreter:
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
     ):
-        self.api_key = api_key or settings.GEMINI_API_KEY
+        self.api_key = api_key or settings.clean_gemini_api_key
         self.model_name = model_name or settings.GEMINI_MODEL
         self._client: Optional[genai.Client] = None
 
@@ -70,27 +70,41 @@ class GeminiInterpreter:
             temperature=0.1,  # Baixa temperatura para determinismo na extração
         )
 
-        try:
-            # Executa a chamada do SDK no thread pool para compatibilidade assíncrona
-            response = await anyio.to_thread.run_sync(
-                lambda: self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config=config,
+        candidate_models = [self.model_name]
+        for fallback in ["gemini-3.5-flash-lite", "gemini-flash-latest"]:
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
+
+        last_error = None
+        for model in candidate_models:
+            try:
+                # Executa a chamada do SDK no thread pool para compatibilidade assíncrona
+                response = await anyio.to_thread.run_sync(
+                    lambda m=model: self.client.models.generate_content(
+                        model=m,
+                        contents=prompt,
+                        config=config,
+                    )
                 )
-            )
 
-            # Faz o parse validado via Pydantic
-            raw_text = response.text or "{}"
-            parsed_data = json.loads(raw_text)
-            return AIInterpretationResult.model_validate(parsed_data)
+                # Faz o parse validado via Pydantic
+                raw_text = response.text or "{}"
+                parsed_data = json.loads(raw_text)
+                return AIInterpretationResult.model_validate(parsed_data)
 
-        except Exception as exc:
-            # Em caso de falha de conexão ou erro do modelo, não derruba o sistema:
-            # devolve resultado seguro de intenção UNKNOWN com o motivo
-            return AIInterpretationResult(
-                intent=IntentType.UNKNOWN,
-                confidence=ConfidenceLevel.LOW,
-                uncertainty_reason=f"Falha na comunicação com o provedor de IA: {str(exc)}",
-                ambiguity_questions=["Não consegui processar a mensagem no momento. Poderia repetir?"],
-            )
+            except Exception as exc:
+                last_error = exc
+                err_str = str(exc)
+                # Se for indisponibilidade temporária de alta demanda (503) ou modelo descontinuado (404), tenta o fallback
+                if "503" in err_str or "404" in err_str or "UNAVAILABLE" in err_str:
+                    continue
+                # Se for outro erro (ex: credencial inválida), interrompe o loop
+                break
+
+        # Em caso de falha de conexão persistente em todos os modelos
+        return AIInterpretationResult(
+            intent=IntentType.UNKNOWN,
+            confidence=ConfidenceLevel.LOW,
+            uncertainty_reason=f"Falha na comunicação com o provedor de IA: {str(last_error)}",
+            ambiguity_questions=["Não consegui processar a mensagem no momento. Poderia repetir?"],
+        )
