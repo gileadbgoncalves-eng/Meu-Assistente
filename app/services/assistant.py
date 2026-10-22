@@ -127,17 +127,24 @@ class AssistantService:
             if disposition == ResponseDisposition.CONFIRMED and evaluated_proposal:
                 result_msg = await self._execute_pending_proposal(user, evaluated_proposal)
                 await self.idempotency_repo.update_status(msg_key, status="processed")
+                self.state_manager.add_history_message(user.id, role="user", text=raw_text)
+                self.state_manager.add_history_message(user.id, role="assistant", text=result_msg)
                 return result_msg
 
             elif disposition == ResponseDisposition.DENIED:
                 await self.idempotency_repo.update_status(msg_key, status="cancelled_by_user")
-                return "Tudo bem, a proposta foi cancelada e nenhuma alteração foi feita na sua agenda."
+                denied_msg = "Tudo bem, a proposta foi cancelada e nenhuma alteração foi feita na sua agenda."
+                self.state_manager.add_history_message(user.id, role="user", text=raw_text)
+                self.state_manager.add_history_message(user.id, role="assistant", text=denied_msg)
+                return denied_msg
 
-        # 4. Interpretação Semântica por IA (Gemini)
+        # 4. Ingestão de Contexto Recente e Interpretação Semântica por IA (Gemini)
+        recent_context = self.state_manager.get_recent_history_context(user.id, max_messages=6)
         interpretation = await self.interpreter.interpret(
             raw_message=raw_text,
             anchor_datetime=anchor_dt,
             user_timezone=user.timezone,
+            recent_context=recent_context or None,
         )
 
         await self.idempotency_repo.update_status(
@@ -154,29 +161,34 @@ class AssistantService:
 
         # Se houver dados ausentes ou necessidade de esclarecimento
         if validated.needs_clarification:
-            return "\n".join(validated.clarification_questions)
+            response_text = "\n".join(validated.clarification_questions)
 
         # 6. Roteamento por Intenção
-        if validated.intent == IntentType.CREATE_EVENT:
-            return await self._handle_create_event(user, validated)
+        elif validated.intent == IntentType.CREATE_EVENT:
+            response_text = await self._handle_create_event(user, validated)
 
         elif validated.intent == IntentType.REMINDER_REQUEST:
-            return await self._handle_reminder_request(user, validated, anchor_dt)
+            response_text = await self._handle_reminder_request(user, validated, interpretation, anchor_dt)
 
         elif validated.intent == IntentType.QUERY_EVENTS:
-            return await self._handle_query_events(user, validated, anchor_dt)
+            response_text = await self._handle_query_events(user, validated, anchor_dt)
 
         elif validated.intent == IntentType.CANCEL_EVENT:
-            return await self._handle_cancel_proposal(user, validated, interpretation, anchor_dt)
+            response_text = await self._handle_cancel_proposal(user, validated, interpretation, anchor_dt)
 
         elif validated.intent == IntentType.UPDATE_EVENT:
-            return await self._handle_update_proposal(user, validated, interpretation, anchor_dt)
+            response_text = await self._handle_update_proposal(user, validated, interpretation, anchor_dt)
 
-        # Intenção desconhecida ou não mapeada
-        return (
-            "Não consegui identificar a ação desejada. Você pode me dizer para agendar um compromisso "
-            "(ex: 'Dentista amanhã às 14h') ou consultar sua agenda (ex: 'O que tenho hoje?')."
-        )
+        else:
+            response_text = (
+                "Não consegui identificar a ação desejada. Você pode me dizer para agendar um compromisso "
+                "(ex: 'Dentista amanhã às 14h') ou consultar sua agenda (ex: 'O que tenho hoje?')."
+            )
+
+        # Registra mensagens no histórico da conversa para resolução anafórica em turnos subsequentes
+        self.state_manager.add_history_message(user.id, role="user", text=raw_text)
+        self.state_manager.add_history_message(user.id, role="assistant", text=response_text)
+        return response_text
 
     async def _handle_create_event(self, user: UserModel, proposal: ValidatedProposal) -> str:
         """Processa intenção de criar evento com verificação de conflitos e agendamento de lembrete."""
@@ -225,6 +237,7 @@ class AssistantService:
             participants_data=proposal.participants,
             status=EventStatus.CONFIRMED.value,
         )
+        self.state_manager.set_last_event_id(user.id, event.id)
 
         # Lembrete Automático / Customizado
         reminder_minutes = (
@@ -270,9 +283,55 @@ class AssistantService:
         self,
         user: UserModel,
         proposal: ValidatedProposal,
+        interpretation: AIInterpretationResult,
         anchor_dt: datetime,
     ) -> str:
-        """Processa pedidos de lembrete avulso ou independente."""
+        """Processa pedidos de lembrete (avulso ou vinculado a compromisso existente via anáfora)."""
+        ref_text = (
+            proposal.event_reference
+            or interpretation.event_reference
+            or proposal.title
+            or ""
+        )
+
+        # 1. Tenta vincular o lembrete a um evento existente (se houver referência anafórica ou tempo relativo)
+        target_event = None
+        is_relative_to_event = bool(
+            proposal.reminder_minutes_before is not None
+            or interpretation.reminder_minutes_before is not None
+            or any(w in ref_text.lower() for w in ["dessa", "desse", "dele", "dela", "consulta", "reunião", "reuniao", "compromisso", "evento"])
+            or self.state_manager.get_last_event_id(user.id) is not None
+        )
+
+        if is_relative_to_event:
+            target_event = await self._find_matching_event(user.id, ref_text, anchor_dt)
+
+        if target_event:
+            minutes_before = (
+                proposal.reminder_minutes_before
+                or interpretation.reminder_minutes_before
+                or getattr(user, "default_reminder_minutes", 60)
+            )
+            trigger_dt = target_event.start_time - timedelta(minutes=minutes_before)
+            offset_text = self._format_offset_br(minutes_before)
+            msg = f"Lembrete: {target_event.title} às {self._format_time_br(target_event.start_time)}"
+
+            reminder = await self.reminder_repo.create_reminder(
+                owner_user_id=user.id,
+                event_id=target_event.id,
+                recipient_phone=user.phone_number,
+                message_text=msg,
+                send_at=trigger_dt,
+            )
+
+            d_str = self._format_date_br(reminder.send_at)
+            h_str = self._format_time_br(reminder.send_at)
+            return (
+                f"🔔 Lembrete configurado com sucesso para o compromisso '{target_event.title}'!\n"
+                f"📅 Disparo programado para {d_str} às {h_str} ({offset_text} antes do evento)."
+            )
+
+        # 2. Lembrete avulso sem vínculo a evento
         trigger_dt = proposal.reminder_trigger_datetime or (anchor_dt + timedelta(hours=1))
         msg = proposal.reminder_message or proposal.title or "Lembrete"
 
@@ -387,32 +446,61 @@ class AssistantService:
     async def _find_matching_event(
         self,
         user_id: int,
-        interpretation: AIInterpretationResult,
+        reference: str | AIInterpretationResult,
         anchor_dt: datetime,
     ) -> Optional[EventModel]:
-        """Busca evento mais provável a partir de referências textuais."""
-        ref = (interpretation.event_reference or interpretation.title or "").strip().lower()
-        if not ref:
-            return None
+        """Busca evento mais provável a partir de referências textuais ou do histórico de sessão."""
+        if isinstance(reference, AIInterpretationResult):
+            ref = (reference.event_reference or reference.title or "").strip().lower()
+        else:
+            ref = (reference or "").strip().lower()
 
-        # Busca eventos a partir de 30 dias atrás até 90 dias no futuro
+        last_event_id = self.state_manager.get_last_event_id(user_id)
+        generic_markers = {
+            "dessa", "desse", "dele", "dela", "deste", "desta",
+            "consulta", "compromisso", "reunião", "reuniao", "evento",
+            "dessa consulta", "desse compromisso", "dessa reuniao", "desse evento",
+            "essa consulta", "esse compromisso", "esse evento", "da consulta", "do evento"
+        }
+
+        # 1. Se houver last_event_id e a referência for genérica/anafórica
+        if last_event_id and (not ref or ref in generic_markers or any(m in ref for m in ["dessa", "desse", "dele", "dela"])):
+            ev = await self.event_repo.get_by_id(last_event_id, owner_user_id=user_id)
+            if ev:
+                return ev
+
+        # 2. Busca eventos na janela temporal (-30 a +90 dias)
         window_start = anchor_dt - timedelta(days=30)
         window_end = anchor_dt + timedelta(days=90)
         events = await self.event_repo.list_events_in_range(user_id, window_start, window_end)
 
-        # 1. Correspondência exata ou de substring
-        for ev in events:
-            if ref in ev.title.lower() or ev.title.lower() in ref:
+        # 3. Correspondência exata ou de substring
+        if ref and ref not in generic_markers:
+            for ev in events:
+                if ref in ev.title.lower() or ev.title.lower() in ref:
+                    return ev
+
+            # 4. Correspondência aproximada por palavras-chave
+            stop_words = {"de", "para", "o", "a", "do", "da", "um", "uma", "com", "em", "no", "na", "esse", "essa", "desse", "dessa", "deste", "desta"}
+            ref_words = set(w for w in ref.split() if w not in stop_words)
+            if ref_words:
+                for ev in events:
+                    ev_words = set(ev.title.lower().split())
+                    if ref_words.intersection(ev_words):
+                        return ev
+
+        # 5. Se não encontrou por texto mas há um último evento ativo no estado
+        if last_event_id:
+            ev = await self.event_repo.get_by_id(last_event_id, owner_user_id=user_id)
+            if ev:
                 return ev
 
-        # 2. Correspondência aproximada por palavras-chave
-        ref_words = set(ref.split())
-        for ev in events:
-            ev_words = set(ev.title.lower().split())
-            if len(ref_words.intersection(ev_words)) >= 1:
-                return ev
+        # 6. Fallback para o evento futuro mais próximo do usuário
+        upcoming = [ev for ev in events if ev.start_time >= anchor_dt]
+        if upcoming:
+            return upcoming[0]
 
-        return None
+        return events[0] if events else None
 
     async def _execute_pending_proposal(
         self,
@@ -434,6 +522,7 @@ class AssistantService:
                 participants_data=proposal.data.get("participants"),
                 status=EventStatus.CONFIRMED.value,
             )
+            self.state_manager.set_last_event_id(user.id, event.id)
             reminder_minutes = (
                 proposal.data.get("reminder_minutes_before")
                 if proposal.data.get("reminder_minutes_before") is not None

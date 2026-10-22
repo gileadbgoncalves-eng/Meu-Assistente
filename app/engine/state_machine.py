@@ -27,11 +27,44 @@ class PendingProposal(BaseModel):
 
 
 class ConversationStateManager:
-    """Gerenciador de estado de conversas e confirmações ativas por usuário."""
+    """Gerenciador de estado de conversas, histórico recente e confirmações ativas por usuário."""
 
     def __init__(self):
         # Armazena em memória as propostas pendentes indexadas por user_id
         self._pending_proposals: dict[int, PendingProposal] = {}
+        # Histórico recente de mensagens por usuário para resolução anafórica
+        self._history: dict[int, list[dict[str, str]]] = {}
+        # Último compromisso criado ou manipulado na sessão
+        self._last_event_ids: dict[int, int] = {}
+
+    def set_last_event_id(self, user_id: int, event_id: int) -> None:
+        """Registra o último compromisso criado ou manipulado na sessão."""
+        self._last_event_ids[user_id] = event_id
+
+    def get_last_event_id(self, user_id: int) -> Optional[int]:
+        """Recupera o ID do último compromisso associado à sessão do usuário."""
+        return self._last_event_ids.get(user_id)
+
+    def add_history_message(self, user_id: int, role: str, text: str) -> None:
+        """Adiciona uma mensagem ao histórico recente do usuário."""
+        if user_id not in self._history:
+            self._history[user_id] = []
+        self._history[user_id].append({"role": role, "text": text})
+        # Mantém as últimas 10 mensagens na janela
+        if len(self._history[user_id]) > 10:
+            self._history[user_id] = self._history[user_id][-10:]
+
+    def get_recent_history_context(self, user_id: int, max_messages: int = 6) -> str:
+        """Retorna o histórico formatado para alimentar o contexto do Gemini."""
+        history = self._history.get(user_id, [])
+        if not history:
+            return ""
+        recent = history[-max_messages:]
+        lines = []
+        for msg in recent:
+            prefix = "Usuário" if msg["role"] == "user" else "Assistente"
+            lines.append(f"{prefix}: {msg['text']}")
+        return "\n".join(lines)
 
     def set_pending(self, user_id: int, proposal: PendingProposal) -> None:
         """Registra uma proposta pendente para o usuário."""
@@ -44,6 +77,12 @@ class ConversationStateManager:
     def clear_pending(self, user_id: int) -> Optional[PendingProposal]:
         """Remove e retorna a proposta pendente do usuário."""
         return self._pending_proposals.pop(user_id, None)
+
+    def clear_session(self, user_id: int) -> None:
+        """Limpa todo o estado em memória da sessão do usuário."""
+        self.clear_pending(user_id)
+        self._history.pop(user_id, None)
+        self._last_event_ids.pop(user_id, None)
 
     @staticmethod
     def is_affirmative(text: str) -> bool:

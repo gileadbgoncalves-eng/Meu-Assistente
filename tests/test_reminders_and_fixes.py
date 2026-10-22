@@ -290,3 +290,117 @@ async def test_reminder_repository_crud_and_link(db_session):
     event_reminders = await reminder_repo.list_by_event(event.id)
     assert len(event_reminders) == 1
     assert event_reminders[0].id == rem1.id
+
+
+# ==============================================================================
+# 3. TESTES DE CONTEXTO MULTI-TURNO E RESOLUÇÃO ANAFÓRICA
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_offline_mock_anaphoric_reminder():
+    """Valida extração pelo mock de lembrete anafórico com antecedência relativa."""
+    mock = OfflineSimulatorMock()
+    anchor = datetime(2026, 10, 22, 10, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    res = await mock.interpret("me lembre dessa consulta 1 dias antes", anchor)
+    assert res.intent == IntentType.REMINDER_REQUEST
+    assert res.reminder_minutes_before == 1440
+    assert res.event_reference is not None
+    assert "dessa consulta" in res.event_reference.lower()
+
+
+@pytest.mark.asyncio
+async def test_multiturn_anaphoric_reminder_resolution(db_session):
+    """Garante que na sequência de 2 turnos:
+    Turno 1: 'consulta para o Bernardo dia 30/10 ás 07:00' -> cria evento
+    Turno 2: 'me lembre dessa consulta 1 dias antes' -> resolve o evento anterior,
+             calcula 29/10/2026 às 07:00 e persiste o lembrete vinculado.
+    """
+    mock = OfflineSimulatorMock()
+    service = AssistantService(session=db_session, interpreter=mock)
+    anchor = datetime(2026, 10, 22, 10, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    phone = "5511999990001"
+
+    # Turno 1: Agendamento do evento
+    resp1 = await service.process_message(
+        phone_number=phone,
+        raw_text="consulta para o Bernardo dia 30/10 ás 07:00",
+        anchor_datetime=anchor,
+    )
+    assert "✅ Compromisso agendado com sucesso!" in resp1
+    assert "30/10/2026" in resp1
+    assert "07h" in resp1
+
+    # Turno 2: Lembrete relativo referenciando o evento anterior
+    resp2 = await service.process_message(
+        phone_number=phone,
+        raw_text="me lembre dessa consulta 1 dias antes",
+        anchor_datetime=anchor,
+    )
+    assert "🔔 Lembrete configurado com sucesso para o compromisso" in resp2
+    assert "29/10/2026 às 07h" in resp2
+    assert "1 dia antes" in resp2
+
+    # Valida no banco de dados
+    user_repo = UserRepository(db_session)
+    user = await user_repo.get_by_phone(phone)
+    assert user is not None
+
+    reminder_repo = ReminderRepository(db_session)
+    reminders = await reminder_repo.list_by_user(user.id)
+    assert len(reminders) >= 2
+
+    target_rem = next(
+        (r for r in reminders if r.send_at.replace(tzinfo=None) == datetime(2026, 10, 29, 7, 0)),
+        None
+    )
+    assert target_rem is not None, "Lembrete de 1 dia antes (29/10 às 07h) não encontrado"
+    assert target_rem.event_id is not None
+
+
+@pytest.mark.asyncio
+async def test_multiturn_anaphoric_reminder_with_mock_interpreter(db_session, mock_interpreter):
+    """Testa o AssistantService simulando a resposta estruturada exata que o Gemini produz
+    para anáfora ('dessa consulta') e antecedência de 1440 minutos.
+    """
+    anchor = datetime(2026, 10, 22, 10, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    phone = "5511999990002"
+    service = AssistantService(session=db_session, interpreter=mock_interpreter)
+
+    # Turno 1: Gemini extrai criação do evento
+    mock_interpreter.set_response(
+        AIInterpretationResult(
+            intent=IntentType.CREATE_EVENT,
+            title="Consulta Médica com Dr. Silva",
+            start_datetime="2026-10-30T07:00:00",
+            end_datetime="2026-10-30T08:00:00",
+            confidence=ConfidenceLevel.HIGH,
+        )
+    )
+    resp1 = await service.process_message(
+        phone_number=phone,
+        raw_text="consulta com Dr Silva dia 30/10 as 07:00",
+        anchor_datetime=anchor,
+    )
+    assert "✅ Compromisso agendado com sucesso!" in resp1
+    assert "Consulta Médica com Dr. Silva" in resp1
+
+    # Turno 2: Gemini reconhece pedido de lembrete com anáfora
+    mock_interpreter.set_response(
+        AIInterpretationResult(
+            intent=IntentType.REMINDER_REQUEST,
+            event_reference="dessa consulta",
+            reminder_minutes_before=1440,
+            confidence=ConfidenceLevel.HIGH,
+        )
+    )
+    resp2 = await service.process_message(
+        phone_number=phone,
+        raw_text="me lembre dessa consulta 1 dia antes",
+        anchor_datetime=anchor,
+    )
+    assert "🔔 Lembrete configurado com sucesso para o compromisso 'Consulta Médica com Dr. Silva'" in resp2
+    assert "29/10/2026 às 07h" in resp2
+    assert "1 dia antes" in resp2
+
+

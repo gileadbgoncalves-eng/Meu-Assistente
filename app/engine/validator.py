@@ -164,14 +164,18 @@ class DeterministicValidator:
                 reminder_message=interpretation.reminder_message,
             )
 
-        # Para solicitação de lembretes avulsos (REMINDER_REQUEST)
+        # Para solicitação de lembretes (avulsos ou relativos a evento existente)
         if interpretation.intent == IntentType.REMINDER_REQUEST:
             reminder_trigger = cls.parse_datetime_with_timezone(
                 interpretation.reminder_trigger_datetime or interpretation.start_datetime,
                 user_timezone,
             )
+            is_relative_to_event = bool(
+                interpretation.reminder_minutes_before is not None
+                or interpretation.event_reference
+            )
 
-            if not reminder_trigger:
+            if not reminder_trigger and not is_relative_to_event:
                 clarification_questions.append("Para quando você gostaria de configurar esse lembrete?")
                 return ValidatedProposal(
                     is_valid=False,
@@ -186,7 +190,9 @@ class DeterministicValidator:
                 is_valid=True,
                 intent=interpretation.intent,
                 title=interpretation.reminder_message or interpretation.title or "Lembrete",
+                event_reference=interpretation.event_reference,
                 timezone_name=user_timezone,
+                reminder_minutes_before=interpretation.reminder_minutes_before,
                 reminder_trigger_datetime=reminder_trigger,
                 reminder_message=interpretation.reminder_message or interpretation.title or "Lembrete",
             )

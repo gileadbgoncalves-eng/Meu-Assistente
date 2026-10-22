@@ -54,7 +54,45 @@ class OfflineSimulatorMock(AIInterpreterProtocol):
                 confidence=ConfidenceLevel.HIGH,
             )
 
-        # 3. Lembretes avulsos / independentes (ex: "me lembra de tomar remédio daqui a 1h")
+        # 3. Pedidos de lembrete relativos referenciando evento anterior (ex: "me lembre dessa consulta 1 dias antes")
+        # Deve ser tratado como REMINDER_REQUEST apenas se NÃO for criação de novo evento com data/hora explícitos
+        has_new_event_schedule = bool(
+            re.search(r"\b(amanh[ãa]|hoje|\d{1,2}/\d{1,2})\b", text)
+            and re.search(r"\b(\d{1,2}:\d{2}|\d{1,2}h|[àa]s\s+\d+)\b", text)
+        )
+
+        rel_rem_match = re.search(
+            r"(?:lembr\w*|avis\w*).*?(?:(dess[ea]|dest[ea]|d[oa]|dele|dela)\s+)?(consulta|reuni[ãa]o|compromisso|m[ée]dico|dentista|evento)?\s*(\d+)\s*(dias?|horas?|h|minutos?|min)\s*antes",
+            text,
+            re.IGNORECASE,
+        )
+        if rel_rem_match and not has_new_event_schedule:
+            dem = rel_rem_match.group(1)
+            ref_type = rel_rem_match.group(2) or "compromisso"
+            qty = int(rel_rem_match.group(3))
+            unit = rel_rem_match.group(4).lower()
+            if "dia" in unit:
+                minutes = qty * 1440
+            elif "h" in unit:
+                minutes = qty * 60
+            else:
+                minutes = qty
+
+            event_ref = f"{dem} {ref_type}".strip() if dem else ref_type
+            if recent_context:
+                m_title = re.search(r"📌\s*([^\n\r]+)", recent_context)
+                if m_title:
+                    event_ref = m_title.group(1).strip()
+
+            return AIInterpretationResult(
+                intent=IntentType.REMINDER_REQUEST,
+                event_reference=event_ref,
+                reminder_minutes_before=minutes,
+                extracted_facts=[raw_message],
+                confidence=ConfidenceLevel.HIGH,
+            )
+
+        # 4. Lembretes avulsos / independentes (ex: "me lembra de tomar remédio daqui a 1h")
         standalone_rem_match = re.search(
             r"(?:lembr\w*\s+de|avisa\w*\s+para)\s+(.+?)(?:\s+daqui\s+a\s+(\d+)\s*(h|horas?|minutos?|min))?$",
             text,
@@ -123,6 +161,16 @@ class OfflineSimulatorMock(AIInterpreterProtocol):
             title = "Consulta com Dentista"
         elif "médico" in text or "medico" in text:
             title = "Consulta Médica"
+        elif "consulta" in text:
+            m_para = re.search(r"consulta\s+(?:para\s+(?:o\s+)?)?([A-Za-zÀ-ÿ]+)", text, re.IGNORECASE)
+            if m_para:
+                target_person = m_para.group(1).capitalize()
+                if target_person.lower() not in {"dia", "às", "as", "ás", "hoje", "amanhã", "amanha"}:
+                    title = f"Consulta para o {target_person}"
+                else:
+                    title = "Consulta"
+            else:
+                title = "Consulta"
         elif "reunião" in text or "reuniao" in text:
             title = "Reunião de Trabalho"
         elif "almoço" in text or "almoco" in text:
@@ -317,8 +365,8 @@ async def run_simulator(mock_mode: bool = False, phone: str = "5511999998888", u
             async with async_session_factory() as session:
                 service = AssistantService(session=session, state_manager=state_manager)
                 user = await service.user_repo.get_or_create(phone, user_name)
-                state_manager.clear_pending(user.id)
-            print("\n🧹 Memória e propostas pendentes da conversa foram resetadas com sucesso.")
+                state_manager.clear_session(user.id)
+            print("\n🧹 Memória, histórico e propostas pendentes da conversa foram resetadas com sucesso.")
             continue
 
         elif user_input.lower() == "/agenda":

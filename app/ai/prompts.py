@@ -41,22 +41,38 @@ Seu trabalho é analisar a mensagem do usuário (texto livre, áudio transcrito 
      * "no almoço" / "ao meio-dia" = 12:00:00
      * "daqui a X minutos / horas" = âncora + X
 
-5. MENSAGENS ENCAMINHADAS E ALTERAÇÕES:
+5. RESOLUÇÃO DE REFERÊNCIA CONTEXTUAL E ANAFÓRICA (MULTI-TURNO):
+   - Se houver histórico de conversa recente fornecido no bloco "CONTEXTO DA CONVERSA RECENTE" e a mensagem do usuário contiver expressões demonstrativas ou referências relativas como:
+     * "me lembre dessa consulta 1 dia antes", "me lembre dessa consulta 1 dias antes", "me avisa desse compromisso 2h antes", "lembrete dessa reunião 30 minutos antes"
+     * "desmarque essa consulta", "cancele esse evento", "mude o horário dele para as 15h"
+   - NUNCA trate como um agendamento novo do zero pedindo qual é o assunto, data ou horário!
+   - Você DEVE:
+     1. Localizar no contexto recente o compromisso que acabou de ser agendado ou discutido (ex: "Consulta para o Bernardo").
+     2. Preencher `event_reference` com o título/assunto desse compromisso (ex: "Consulta para o Bernardo").
+     3. Para pedidos de lembrete relativo ao compromisso ("me lembre dessa consulta X antes"):
+        - `intent`: "reminder_request" (ou "update_event")
+        - `event_reference`: Título do evento referenciado (ex: "Consulta para o Bernardo")
+        - `reminder_minutes_before`: Quantidade de minutos antes do evento (ex: 1 dia = 1440, 2h = 120, 30 min = 30)
+        - `missing_fields`: [] (NÃO crie perguntas de ambiguidade sobre assunto/data/hora)
+        - `ambiguity_questions`: []
+        - `confidence`: "high"
+
+6. MENSAGENS ENCAMINHADAS E ALTERAÇÕES:
    - Ao receber mensagens como "A reunião da escola do Bernardo, antes marcada para terça, passou para quinta-feira ao meio-dia":
      * Identifique `intent` como `update_event`.
      * Preencha `event_reference` com o evento mencionado ("Reunião da escola do Bernardo").
      * Preencha `proposed_changes` com a mudança (ex: campo start_datetime para quinta-feira 12:00).
      * `extracted_facts` deve conter a alteração explícita de terça para quinta às 12h.
 
-6. PARTICIPANTES E SUBSTITUIÇÕES:
+7. PARTICIPANTES E SUBSTITUIÇÕES:
    - Se o usuário disser "reunião com Pedro, Thiago e João", adicione os 3 em `participants`.
    - Se disser "João não vai, Caio irá no lugar", registre Caio com `replaces_name: "João"` e `intent: replace_participant`.
 
-7. CONFIRMAÇÃO OU RECUSA:
+8. CONFIRMAÇÃO OU RECUSA:
    - Se a mensagem do usuário for uma resposta direta a uma proposta anterior ("sim", "confirmo", "pode agendar", "beleza", "fechado", "isso mesmo"), preencha `is_confirmation_or_denial: "confirmed"`.
    - Se for uma negação ("não", "cancela", "deixa quieto", "esquece", "não quero mais"), preencha `is_confirmation_or_denial: "denied"`.
 
-8. PREVENÇÃO DE ALUCINAÇÃO:
+9. PREVENÇÃO DE ALUCINAÇÃO:
    - Não confunda hipóteses ("talvez eu vá", "estou pensando em...") com ordens definitivas. Em caso de dúvida, marque `confidence: "low"` ou `"medium"` e explique em `uncertainty_reason`.
    - Separe estritamente o que foi dito de forma explícita (`extracted_facts`) do que foi inferido (`inferred_fields`).
 """
