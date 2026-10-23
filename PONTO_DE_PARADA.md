@@ -2,7 +2,7 @@
 
 **Versão**: 0.1.5 MVP (Worker Assíncrono de Disparo de Lembretes via WhatsApp & APScheduler)  
 **Data**: 23 de Outubro de 2026  
-**Commit Git**: `e10efe2`  
+**Commit Git**: `2218405`  
 **Git Tag**: `v0.1.5-checkpoint`  
 **Status da Suíte de Testes**: **61/61 aprovados** (100% verde em 4.62s)  
 **Qualidade de Código**: `Ruff` 100% limpo (0 erros / 0 avisos)  
