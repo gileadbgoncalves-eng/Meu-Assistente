@@ -3,6 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
@@ -22,11 +23,24 @@ from app.domain.exceptions import (
 )
 from app.domain.formatters import DataSanitizer
 from app.services.assistant import AssistantService
+from app.services.reminder_dispatcher import ReminderDispatcherService
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
 logger = logging.getLogger("meu_assistente.api")
 
 whatsapp_client = WhatsAppClient()
+scheduler = AsyncIOScheduler()
+reminder_dispatcher = ReminderDispatcherService(whatsapp_client=whatsapp_client)
+
+
+async def sweep_and_dispatch_reminders() -> None:
+    """Varredura periódica de lembretes pendentes e envio via WhatsApp."""
+    try:
+        count = await reminder_dispatcher.dispatch_due_reminders()
+        if count > 0:
+            logger.info("Varredura de lembretes executada: %d lembrete(s) disparado(s).", count)
+    except Exception as exc:
+        logger.error("Erro durante a varredura automática de lembretes: %s", exc)
 
 
 async def process_and_reply_whatsapp(message: IncomingWhatsAppMessage) -> None:
@@ -51,10 +65,33 @@ async def process_and_reply_whatsapp(message: IncomingWhatsAppMessage) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Ciclo de vida da aplicação: inicializa e encerra conexões."""
+    """Ciclo de vida da aplicação: inicializa conexões e agendador em background."""
     logger.info("Iniciando %s e preparando banco de dados...", settings.PROJECT_NAME)
     await init_db()
+
+    app.state.scheduler = scheduler
+    app.state.reminder_dispatcher = reminder_dispatcher
+
+    if settings.REMINDERS_ENABLED:
+        scheduler.add_job(
+            sweep_and_dispatch_reminders,
+            trigger="interval",
+            seconds=settings.REMINDER_SWEEP_INTERVAL_SECONDS,
+            id="reminder_sweeper_job",
+            replace_existing=True,
+        )
+        scheduler.start()
+        logger.info(
+            "Agendador de lembretes (APScheduler) iniciado (intervalo: %ds).",
+            settings.REMINDER_SWEEP_INTERVAL_SECONDS,
+        )
+
     yield
+
+    if settings.REMINDERS_ENABLED and scheduler.running:
+        logger.info("Encerrando agendador de lembretes...")
+        scheduler.shutdown(wait=False)
+
     logger.info("Encerrando conexões de banco de dados...")
     await close_db()
 

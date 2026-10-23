@@ -16,7 +16,7 @@ from app.db.models import (
     ReminderModel,
     UserModel,
 )
-from app.domain.enums import ActionType, EventStatus, IdempotencyStatus
+from app.domain.enums import ActionType, EventStatus, IdempotencyStatus, ReminderStatus
 from app.domain.exceptions import (
     EntityNotFoundError,
     IdempotencyDuplicateError,
@@ -400,4 +400,33 @@ class ReminderRepository:
         )
         result = await self.session.execute(query)
         return result.scalars().all()
+
+    async def list_pending_due_reminders(
+        self, until_time: datetime
+    ) -> Sequence[ReminderModel]:
+        """Busca todos os lembretes pendentes cujo horário de disparo é menor ou igual ao informado."""
+        query = (
+            select(ReminderModel)
+            .where(
+                and_(
+                    ReminderModel.status == ReminderStatus.PENDING.value,
+                    ReminderModel.send_at <= until_time,
+                )
+            )
+            .order_by(ReminderModel.send_at.asc())
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def update_status(
+        self, reminder_id: int, status: str | ReminderStatus
+    ) -> None:
+        """Atualiza o status de um lembrete (ex: sent, failed)."""
+        status_val = status.value if hasattr(status, "value") else str(status)
+        query = select(ReminderModel).where(ReminderModel.id == reminder_id)
+        result = await self.session.execute(query)
+        reminder = result.scalar_one_or_none()
+        if reminder:
+            reminder.status = status_val
+            await self.session.flush()
 

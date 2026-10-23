@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     WHATSAPP_APP_SECRET: str = ""
     WHATSAPP_API_VERSION: str = "v21.0"
 
+    # Configurações do Agendador de Lembretes (Worker em Background)
+    REMINDERS_ENABLED: bool = Field(
+        default=True,
+        description="Habilita ou desabilita o disparo de lembretes em background",
+    )
+    REMINDER_SWEEP_INTERVAL_SECONDS: int = Field(
+        default=60,
+        description="Intervalo em segundos entre cada varredura de lembretes pendentes",
+    )
+
     # Futuras integrações (Google Agenda & Maps)
     GOOGLE_CALENDAR_CREDENTIALS_FILE: str = ""
     GOOGLE_MAPS_API_KEY: str = ""
