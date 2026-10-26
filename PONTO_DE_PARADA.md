@@ -78,12 +78,11 @@ Arquivo de testes `tests/test_reminder_dispatcher.py` implementado com mocks ass
 
 ## 🌐 4. Sincronização com o GitHub
 
-Para enviar este marco com todas as tags para o seu repositório remoto no GitHub:
+Repositório oficial configurado e sincronizado com sucesso:
+- **URL**: `https://github.com/gileadbgoncalves-eng/Meu-Assistente`
 
+Comandos para envios futuros:
 ```powershell
-# Caso ainda não tenha adicionado o remote:
-git remote add origin https://github.com/gileadduarte/<NOME_DO_REPOSITORIO>.git
-
-# Enviar os commits e as tags:
-git push -u origin master --tags
+# Enviar novos commits e tags:
+git push origin master --tags
 ```
