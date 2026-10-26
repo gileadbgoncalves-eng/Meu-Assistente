@@ -30,6 +30,7 @@ class EventParticipant(BaseModel):
     event_id: int | None = None
     name: str
     phone_number: str | None = None
+    email: str | None = None
     contact_id: int | None = None
     user_id: int | None = None
     role: ParticipantRole = ParticipantRole.ATTENDEE
@@ -49,6 +50,8 @@ class Event(BaseModel):
     location: Location | str | None = None
     location_id: int | None = None
     contact_id: int | None = None
+    main_contact_id: int | None = None
+    participant_ids: list[int] = Field(default_factory=list)
     status: EventStatus = EventStatus.DRAFT
     confidence_score: float = 1.0
     participants: list[EventParticipant] = Field(default_factory=list)
@@ -70,6 +73,11 @@ class Event(BaseModel):
             self.estimated_travel_minutes = self.travel_time_minutes
         elif self.estimated_travel_minutes is not None and self.travel_time_minutes is None:
             self.travel_time_minutes = self.estimated_travel_minutes
+
+        if self.main_contact_id is not None and self.contact_id is None:
+            self.contact_id = self.main_contact_id
+        elif self.contact_id is not None and self.main_contact_id is None:
+            self.main_contact_id = self.contact_id
 
 
 class User(BaseModel):

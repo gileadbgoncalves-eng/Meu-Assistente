@@ -14,6 +14,8 @@ class EventCreateRequest(BaseModel):
     travel_time_minutes: int | None = Field(None, description="Tempo estimado de deslocamento em minutos")
     reminder_minutes_before: int = Field(60, description="Minutos de antecedência para o lembrete")
     contact_id: int | None = Field(None, description="ID do contato associado")
+    main_contact_id: int | None = Field(None, description="ID do contato principal associado")
+    participant_ids: list[int] = Field(default_factory=list, description="IDs dos contatos participantes")
 
 
 class EventUpdateRequest(BaseModel):
@@ -25,6 +27,8 @@ class EventUpdateRequest(BaseModel):
     travel_time_minutes: int | None = None
     status: str | None = None
     contact_id: int | None = None
+    main_contact_id: int | None = None
+    participant_ids: list[int] | None = None
 
 
 class EventResponse(BaseModel):
@@ -39,6 +43,8 @@ class EventResponse(BaseModel):
     travel_time_minutes: int | None = None
     external_calendar_id: str | None = None
     contact_id: int | None = None
+    main_contact_id: int | None = None
+    participant_ids: list[int] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

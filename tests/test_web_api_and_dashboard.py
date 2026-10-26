@@ -4,26 +4,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.db.session import get_db_session
-from app.main import app
+from httpx import AsyncClient
 
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
-
-
-@pytest.fixture
-async def api_client(db_session: AsyncSession):
-    """Cliente HTTP assíncrono com injeção do banco em memória isolado."""
-    async def override_get_db_session():
-        yield db_session
-
-    app.dependency_overrides[get_db_session] = override_get_db_session
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client
-    app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
@@ -286,4 +269,44 @@ async def test_api_events_multiuser_isolation(api_client: AsyncClient):
     res_a = await api_client.get("/api/v1/events", headers=headers_user_a)
     assert res_a.status_code == 200
     assert any(ev["id"] == event_id and ev["status"] == "confirmed" for ev in res_a.json())
+
+
+@pytest.mark.asyncio
+async def test_api_events_with_participants_and_edit(api_client: AsyncClient):
+    """Testa criação e edição de evento com vínculo de contato principal e participantes."""
+    headers = {"X-User-Phone": "5511999990001"}
+
+    # 1. Cria 2 contatos
+    c1 = (await api_client.post("/api/v1/contacts", json={"name": "Dra. Mariana", "phone": "5511988881111", "email": "mariana@clinica.com"}, headers=headers)).json()
+    c2 = (await api_client.post("/api/v1/contacts", json={"name": "Carlos Assistente", "phone": "5511988882222", "email": "carlos@clinica.com"}, headers=headers)).json()
+
+    # 2. Cria evento com c1 como main_contact e c2 como participante
+    start_dt = datetime(2026, 12, 1, 14, 0, tzinfo=SAO_PAULO_TZ)
+    end_dt = datetime(2026, 12, 1, 15, 0, tzinfo=SAO_PAULO_TZ)
+    payload = {
+        "title": "Cirurgia Eletiva",
+        "start_time": start_dt.isoformat(),
+        "end_time": end_dt.isoformat(),
+        "location": "Hospital São Paulo",
+        "main_contact_id": c1["id"],
+        "participant_ids": [c2["id"]],
+    }
+    res_create = await api_client.post("/api/v1/events", json=payload, headers=headers)
+    assert res_create.status_code == 201
+    ev_data = res_create.json()
+    assert ev_data["main_contact_id"] == c1["id"]
+    assert ev_data["contact_id"] == c1["id"]
+    assert c2["id"] in ev_data["participant_ids"]
+
+    # 3. Edita o evento via PATCH /api/v1/events/{id}: altera título e adiciona c1 também aos participantes
+    patch_payload = {
+        "title": "Cirurgia Eletiva Atualizada",
+        "participant_ids": [c1["id"], c2["id"]],
+    }
+    res_patch = await api_client.patch(f"/api/v1/events/{ev_data['id']}", json=patch_payload, headers=headers)
+    assert res_patch.status_code == 200
+    patched_data = res_patch.json()
+    assert patched_data["title"] == "Cirurgia Eletiva Atualizada"
+    assert c1["id"] in patched_data["participant_ids"]
+    assert c2["id"] in patched_data["participant_ids"]
 

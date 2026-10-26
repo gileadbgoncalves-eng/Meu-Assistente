@@ -154,6 +154,7 @@ class EventParticipantModel(Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(128), nullable=True)
     role: Mapped[str] = mapped_column(String(32), default=ParticipantRole.ATTENDEE.value, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default=ParticipantStatus.PENDING.value, nullable=False)
     replaces_participant_id: Mapped[int | None] = mapped_column(
@@ -162,6 +163,7 @@ class EventParticipantModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     event: Mapped["EventModel"] = relationship("EventModel", back_populates="participants")
+    contact: Mapped[Optional["ContactModel"]] = relationship("ContactModel")
 
 
 class AvailabilityRuleModel(Base):

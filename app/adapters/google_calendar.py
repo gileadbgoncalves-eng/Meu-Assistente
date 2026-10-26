@@ -50,7 +50,15 @@ class GoogleCalendarAdapter(CalendarSyncPort, CalendarAdapterProtocol):
                 if isinstance(event_or_data.location, str)
                 else (event_or_data.location.raw_address if event_or_data.location else "")
             )
-            attendees = [{"displayName": p.name} for p in event_or_data.participants if p.name]
+            attendees = []
+            for p in event_or_data.participants:
+                att = {}
+                if getattr(p, "name", None):
+                    att["displayName"] = p.name
+                if getattr(p, "email", None):
+                    att["email"] = p.email
+                if att:
+                    attendees.append(att)
             tz = event_or_data.timezone or "America/Sao_Paulo"
         else:
             title = event_or_data.get("title", "Compromisso")
@@ -62,8 +70,19 @@ class GoogleCalendarAdapter(CalendarSyncPort, CalendarAdapterProtocol):
             location = event_or_data.get("location_address") or event_or_data.get("location") or ""
             attendees = []
             for p in event_or_data.get("participants", []):
-                if isinstance(p, dict) and p.get("name"):
-                    attendees.append({"displayName": p["name"]})
+                if isinstance(p, dict):
+                    att = {}
+                    if p.get("name"):
+                        att["displayName"] = p["name"]
+                    if p.get("email"):
+                        att["email"] = p["email"]
+                    if att:
+                        attendees.append(att)
+                elif hasattr(p, "name"):
+                    att = {"displayName": p.name}
+                    if getattr(p, "email", None):
+                        att["email"] = p.email
+                    attendees.append(att)
             tz = event_or_data.get("timezone", "America/Sao_Paulo")
 
         return {

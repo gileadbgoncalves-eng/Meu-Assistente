@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -11,8 +12,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.ai.schemas import AIInterpretationResult
-from app.db.session import Base
+from app.db.session import Base, get_db_session
 from app.domain.enums import ConfidenceLevel, IntentType
+from app.main import app
 
 
 class MockGeminiInterpreter:
@@ -99,3 +101,16 @@ async def db_session() -> AsyncSession:
         await conn.run_sync(Base.metadata.drop_all)
 
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def api_client(db_session: AsyncSession):
+    """Cliente HTTP assíncrono com injeção do banco em memória isolado."""
+    async def override_get_db_session():
+        yield db_session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+    app.dependency_overrides.clear()

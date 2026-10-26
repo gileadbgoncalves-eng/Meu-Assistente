@@ -219,3 +219,65 @@ async def test_fastapi_lifespan_initializes_scheduler():
 
     # Ao sair do contexto, o scheduler deve ser finalizado
     assert scheduler.running is False
+
+
+@pytest.mark.asyncio
+async def test_reminder_dispatcher_notifies_participants(db_session: AsyncSession):
+    """Garante que ao disparar lembrete de um evento com participantes, todos os contatos são notificados."""
+    from app.db.repository import ContactRepository, EventRepository
+
+    tz = ZoneInfo("America/Sao_Paulo")
+    user_repo = UserRepository(db_session)
+    event_repo = EventRepository(db_session)
+    reminder_repo = ReminderRepository(db_session)
+    contact_repo = ContactRepository(db_session)
+
+    user = await user_repo.get_or_create("5511999993333", "Beatriz")
+    contact = await contact_repo.create(
+        owner_user_id=user.id,
+        name="Dr. Fernando",
+        phone="5511977778888",
+        email="fernando@clinica.com",
+    )
+
+    now_dt = datetime(2026, 10, 23, 14, 0, tzinfo=tz)
+    event = await event_repo.create_event(
+        owner_user_id=user.id,
+        title="Consulta com Dr. Fernando",
+        start_time=now_dt + timedelta(hours=1),
+        end_time=now_dt + timedelta(hours=2),
+        main_contact_id=contact.id,
+        participant_ids=[contact.id],
+    )
+
+    # Cria lembrete vencido para o evento
+    await reminder_repo.create_reminder(
+        owner_user_id=user.id,
+        event_id=event.id,
+        recipient_phone=user.phone_number,
+        message_text="Lembrete: Consulta com Dr. Fernando às 15h",
+        send_at=now_dt - timedelta(minutes=5),
+    )
+    await db_session.commit()
+
+    mock_client = AsyncMock(spec=WhatsAppClient)
+    mock_client.send_text_message.return_value = True
+
+    test_session_factory = async_sessionmaker(
+        bind=db_session.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    dispatcher = ReminderDispatcherService(
+        session_factory=test_session_factory,
+        whatsapp_client=mock_client,
+    )
+
+    count = await dispatcher.dispatch_due_reminders(until_time=now_dt)
+    assert count == 1
+
+    # O cliente WhatsApp deve ter sido chamado para o owner E para o participante!
+    phones_called = [call.kwargs.get("recipient_phone") for call in mock_client.send_text_message.await_args_list]
+    assert user.phone_number in phones_called
+    assert contact.phone_number in phones_called

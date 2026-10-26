@@ -356,12 +356,18 @@ class AssistantService:
         if reminder_minutes <= 0:
             return ""
 
-        reminder_send_at = event.start_time - timedelta(minutes=reminder_minutes)
+        user_tz = ZoneInfo(user.timezone)
+        ev_start = (
+            event.start_time.replace(tzinfo=user_tz)
+            if event.start_time.tzinfo is None
+            else event.start_time.astimezone(user_tz)
+        )
+        reminder_send_at = ev_start - timedelta(minutes=reminder_minutes)
         reminder = await self.reminder_repo.create_reminder(
             owner_user_id=user.id,
             event_id=event.id,
             recipient_phone=user.phone_number,
-            message_text=f"Lembrete: {event.title} às {self._format_time_br(event.start_time)}",
+            message_text=f"Lembrete: {event.title} às {self._format_time_br(ev_start)}",
             send_at=reminder_send_at,
         )
         rem_d = self._format_date_br(reminder.send_at)
@@ -412,9 +418,15 @@ class AssistantService:
         minutes_before: int,
     ) -> str:
         """Cria e persiste um lembrete vinculado a um evento existente."""
-        trigger_dt = target_event.start_time - timedelta(minutes=minutes_before)
+        user_tz = ZoneInfo(user.timezone)
+        ev_start = (
+            target_event.start_time.replace(tzinfo=user_tz)
+            if target_event.start_time.tzinfo is None
+            else target_event.start_time.astimezone(user_tz)
+        )
+        trigger_dt = ev_start - timedelta(minutes=minutes_before)
         offset_text = self._format_offset_br(minutes_before)
-        msg = f"Lembrete: {target_event.title} às {self._format_time_br(target_event.start_time)}"
+        msg = f"Lembrete: {target_event.title} às {self._format_time_br(ev_start)}"
 
         reminder = await self.reminder_repo.create_reminder(
             owner_user_id=user.id,
@@ -659,12 +671,18 @@ class AssistantService:
             )
             reminder_str = ""
             if reminder_minutes > 0:
-                reminder_send_at = event.start_time - timedelta(minutes=reminder_minutes)
+                user_tz = ZoneInfo(user.timezone)
+                ev_start = (
+                    event.start_time.replace(tzinfo=user_tz)
+                    if event.start_time.tzinfo is None
+                    else event.start_time.astimezone(user_tz)
+                )
+                reminder_send_at = ev_start - timedelta(minutes=reminder_minutes)
                 reminder = await self.reminder_repo.create_reminder(
                     owner_user_id=user.id,
                     event_id=event.id,
                     recipient_phone=user.phone_number,
-                    message_text=f"Lembrete: {event.title} às {self._format_time_br(event.start_time)}",
+                    message_text=f"Lembrete: {event.title} às {self._format_time_br(ev_start)}",
                     send_at=reminder_send_at,
                 )
                 rem_d = self._format_date_br(reminder.send_at)

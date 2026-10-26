@@ -83,8 +83,11 @@ class EventRepository:
         external_calendar_id: str | None = None,
         travel_time_minutes: int | None = None,
         contact_id: int | None = None,
+        main_contact_id: int | None = None,
+        participant_ids: list[int] | None = None,
     ) -> EventModel:
         author_id = author_user_id or owner_user_id
+        effective_contact_id = main_contact_id if main_contact_id is not None else contact_id
 
         # Se houver localização, cria registro e armazena texto
         effective_location = location or location_address
@@ -105,7 +108,7 @@ class EventRepository:
             timezone=timezone,
             location_id=location_id,
             location_name=str(loc_str) if loc_str else None,
-            contact_id=contact_id,
+            contact_id=effective_contact_id,
             external_calendar_id=external_calendar_id,
             travel_time_minutes=travel_time_minutes,
             estimated_travel_minutes=travel_time_minutes,
@@ -115,13 +118,37 @@ class EventRepository:
         self.session.add(event)
         await self.session.flush()
 
-        # Adiciona participantes
+        # Adiciona participantes via participant_ids (contatos do usuário)
+        if participant_ids:
+            contacts_res = await self.session.execute(
+                select(ContactModel).where(
+                    and_(
+                        ContactModel.id.in_(participant_ids),
+                        ContactModel.owner_user_id == owner_user_id,
+                    )
+                )
+            )
+            for c in contacts_res.scalars().all():
+                participant = EventParticipantModel(
+                    event_id=event.id,
+                    contact_id=c.id,
+                    name=c.name,
+                    phone_number=c.phone_number,
+                    email=c.email,
+                    role="attendee",
+                    status="pending",
+                )
+                self.session.add(participant)
+            await self.session.flush()
+
+        # Adiciona participantes via dicionário livre (retrocompatibilidade)
         if participants_data:
             for p in participants_data:
                 participant = EventParticipantModel(
                     event_id=event.id,
                     name=p.get("name", "Participante"),
                     phone_number=p.get("phone_number"),
+                    email=p.get("email"),
                     contact_id=p.get("contact_id"),
                     role=p.get("role", "attendee"),
                     status=p.get("status", "pending"),
@@ -239,8 +266,42 @@ class EventRepository:
         if not event:
             raise EntityNotFoundError("Evento", event_id)
 
+        clean_updates = dict(updates)
+        if "main_contact_id" in clean_updates:
+            clean_updates["contact_id"] = clean_updates.pop("main_contact_id")
+
+        if "location" in clean_updates:
+            clean_updates["location_name"] = str(clean_updates.pop("location") or "")
+
+        participant_ids = clean_updates.pop("participant_ids", None)
+        if participant_ids is not None:
+            event.participants.clear()
+            await self.session.flush()
+            if participant_ids:
+                contacts_res = await self.session.execute(
+                    select(ContactModel).where(
+                        and_(
+                            ContactModel.id.in_(participant_ids),
+                            ContactModel.owner_user_id == owner_user_id,
+                        )
+                    )
+                )
+                for c in contacts_res.scalars().all():
+                    event.participants.append(
+                        EventParticipantModel(
+                            event_id=event.id,
+                            contact_id=c.id,
+                            name=c.name,
+                            phone_number=c.phone_number,
+                            email=c.email,
+                            role="attendee",
+                            status="pending",
+                        )
+                    )
+            await self.session.flush()
+
         previous_values = {}
-        for key, value in updates.items():
+        for key, value in clean_updates.items():
             if hasattr(event, key):
                 current_val = getattr(event, key)
                 previous_values[key] = (
@@ -257,13 +318,13 @@ class EventRepository:
             previous_values=previous_values,
             new_values={
                 k: (v.isoformat() if isinstance(v, datetime) else v)
-                for k, v in updates.items()
+                for k, v in clean_updates.items()
             },
             reason=reason or "Atualização de compromisso",
         )
         self.session.add(audit)
         await self.session.flush()
-        return event
+        return await self.get_by_id(event.id, owner_user_id=owner_user_id)  # type: ignore
 
     async def cancel_event(
         self,
@@ -419,6 +480,10 @@ class ReminderRepository:
         """Busca todos os lembretes pendentes cujo horário de disparo é menor ou igual ao informado."""
         query = (
             select(ReminderModel)
+            .options(
+                selectinload(ReminderModel.event).selectinload(EventModel.participants),
+                selectinload(ReminderModel.event).selectinload(EventModel.location),
+            )
             .where(
                 and_(
                     ReminderModel.status == ReminderStatus.PENDING.value,

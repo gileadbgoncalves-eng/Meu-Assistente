@@ -121,6 +121,37 @@ class ReminderDispatcherService:
             )
             if success:
                 logger.info("Lembrete #%d enviado com sucesso para %s.", reminder.id, masked_phone)
+
+                # Se o evento possuir participantes, notifica também seus números de WhatsApp/e-mail
+                if event and getattr(event, "participants", None):
+                    for p in event.participants:
+                        if p.phone_number:
+                            masked_p = DataSanitizer.mask_phone(p.phone_number)
+                            logger.info(
+                                "Notificando participante %s (%s) sobre o compromisso do lembrete #%d",
+                                p.name,
+                                masked_p,
+                                reminder.id,
+                            )
+                            try:
+                                part_msg = f"Olá, {p.name}! {msg_text}"
+                                await self.whatsapp_client.send_text_message(
+                                    recipient_phone=p.phone_number,
+                                    text=part_msg,
+                                )
+                            except Exception as p_exc:
+                                logger.warning(
+                                    "Falha ao notificar participante %s via WhatsApp: %s",
+                                    p.name,
+                                    p_exc,
+                                )
+                        elif getattr(p, "email", None):
+                            logger.info(
+                                "Participante %s registrado para notificação por e-mail (%s)",
+                                p.name,
+                                p.email,
+                            )
+
                 return True
 
             logger.warning(

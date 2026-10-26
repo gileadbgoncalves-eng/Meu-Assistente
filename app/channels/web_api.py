@@ -25,9 +25,9 @@ from app.channels.schemas_web import (
 from app.db.models import ReminderModel, UserModel
 from app.db.repository import ContactRepository, EventRepository, ReminderRepository, UserRepository
 from app.db.session import get_db_session
-from app.domain.entities import Event, Location
+from app.domain.entities import Event, EventParticipant, Location
 from app.domain.enums import EventStatus
-from app.domain.formatters import ExecutiveBriefingFormatter
+from app.domain.formatters import BrazilianDateTimeFormatter, ExecutiveBriefingFormatter
 from app.engine.conflict import ConflictDetector
 
 router = APIRouter(prefix="/api/v1", tags=["REST API"])
@@ -97,6 +97,8 @@ async def list_events(
             travel_time_minutes=ev.travel_time_minutes,
             external_calendar_id=ev.external_calendar_id,
             contact_id=ev.contact_id,
+            main_contact_id=ev.contact_id,
+            participant_ids=[p.contact_id for p in ev.participants if p.contact_id is not None],
         )
         for ev in events
     ]
@@ -110,8 +112,8 @@ async def create_event(
 ):
     """Cria um novo compromisso com validação determinística de conflitos e sincronização."""
     user_tz = ZoneInfo(current_user.timezone)
-    s_time = req.start_time if req.start_time.tzinfo else req.start_time.replace(tzinfo=user_tz)
-    e_time = req.end_time if req.end_time.tzinfo else req.end_time.replace(tzinfo=user_tz)
+    s_time = req.start_time.astimezone(user_tz) if req.start_time.tzinfo else req.start_time.replace(tzinfo=user_tz)
+    e_time = req.end_time.astimezone(user_tz) if req.end_time.tzinfo else req.end_time.replace(tzinfo=user_tz)
 
     if e_time <= s_time:
         raise HTTPException(
@@ -137,6 +139,7 @@ async def create_event(
             detail=conflict_report.warning_message or "Existe um conflito de horário com outro compromisso.",
         )
 
+    effective_contact_id = req.main_contact_id if req.main_contact_id is not None else req.contact_id
     ev = await event_repo.create_event(
         owner_user_id=current_user.id,
         title=req.title,
@@ -146,7 +149,9 @@ async def create_event(
         description=req.description,
         location=req.location,
         travel_time_minutes=req.travel_time_minutes,
-        contact_id=req.contact_id,
+        contact_id=effective_contact_id,
+        main_contact_id=effective_contact_id,
+        participant_ids=req.participant_ids,
         status=EventStatus.CONFIRMED.value,
     )
 
@@ -158,7 +163,7 @@ async def create_event(
             owner_user_id=current_user.id,
             event_id=ev.id,
             recipient_phone=current_user.phone_number,
-            message_text=f"Lembrete: {ev.title} às {ev.start_time.strftime('%Hh%M')}",
+            message_text=f"Lembrete: {ev.title} às {BrazilianDateTimeFormatter.format_time(s_time)}",
             send_at=send_at,
         )
 
@@ -166,14 +171,28 @@ async def create_event(
     try:
         gcal = GoogleCalendarAdapter()
         loc_entity = Location(raw_address=req.location) if req.location else None
+        participants_entities = [
+            EventParticipant(
+                name=p.name,
+                phone_number=p.phone_number,
+                email=p.email,
+                contact_id=p.contact_id,
+            )
+            for p in ev.participants
+        ]
         event_entity = Event(
             id=ev.id,
+            owner_user_id=current_user.id,
             title=ev.title,
-            start_time=ev.start_time,
-            end_time=ev.end_time,
+            start_time=s_time,
+            end_time=e_time,
             location=loc_entity,
+            contact_id=ev.contact_id,
+            main_contact_id=ev.contact_id,
+            participants=participants_entities,
         )
-        gcal_id = await gcal.create_event(event_entity)
+        gcal_res = await gcal.create_event(event_entity)
+        gcal_id = getattr(gcal_res, "external_id", None) or (str(gcal_res) if gcal_res else None)
         if gcal_id:
             await event_repo.update_event(ev.id, owner_user_id=current_user.id, updates={"external_calendar_id": gcal_id})
             ev.external_calendar_id = gcal_id
@@ -192,6 +211,8 @@ async def create_event(
         travel_time_minutes=ev.travel_time_minutes,
         external_calendar_id=ev.external_calendar_id,
         contact_id=ev.contact_id,
+        main_contact_id=ev.contact_id,
+        participant_ids=[p.contact_id for p in ev.participants if p.contact_id is not None],
     )
 
 
@@ -204,7 +225,16 @@ async def update_event(
 ):
     """Atualiza campos de um compromisso."""
     event_repo = EventRepository(session)
+    user_tz = ZoneInfo(current_user.timezone)
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
+
+    if "start_time" in updates:
+        st = updates["start_time"]
+        updates["start_time"] = st.astimezone(user_tz) if st.tzinfo else st.replace(tzinfo=user_tz)
+    if "end_time" in updates:
+        et = updates["end_time"]
+        updates["end_time"] = et.astimezone(user_tz) if et.tzinfo else et.replace(tzinfo=user_tz)
+
     if not updates:
         ev = await event_repo.get_by_id(event_id, owner_user_id=current_user.id)
         if not ev:
@@ -228,6 +258,8 @@ async def update_event(
         travel_time_minutes=ev.travel_time_minutes,
         external_calendar_id=ev.external_calendar_id,
         contact_id=ev.contact_id,
+        main_contact_id=ev.contact_id,
+        participant_ids=[p.contact_id for p in ev.participants if p.contact_id is not None],
     )
 
 

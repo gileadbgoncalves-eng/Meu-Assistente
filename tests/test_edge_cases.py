@@ -174,3 +174,65 @@ async def test_edge_case_prompt_injection_safety(db_session, mock_interpreter):
     # Garante que a tabela de usuários continua intacta
     user = await service.user_repo.get_by_phone("5511999990001")
     assert user is not None
+
+
+@pytest.mark.asyncio
+async def test_edge_case_web_api_timezone_reminder_calculation(api_client):
+    """Testa regressão do bug crítico de fuso horário no cálculo de lembretes da API Web.
+    Um evento criado para 30/10 às 07:00 deve gerar o lembrete para 06:00 (1h antes),
+    e o texto da mensagem deve indicar 07h (e não 10h devido a confusão UTC vs America/Sao_Paulo).
+    """
+    headers = {"X-User-Phone": "5511999990001"}
+    sp_tz = ZoneInfo("America/Sao_Paulo")
+
+    # 1. Evento enviado com string datetime local (como enviado pelo input HTML datetime-local)
+    payload_local = {
+        "title": "Consulta Matinal Dr. Roberto",
+        "start_time": "2026-10-30T07:00:00",
+        "end_time": "2026-10-30T08:00:00",
+        "location": "Consultório Central",
+        "reminder_minutes_before": 60,
+    }
+
+    res = await api_client.post("/api/v1/events", json=payload_local, headers=headers)
+    assert res.status_code == 201
+    ev_data = res.json()
+    assert ev_data["title"] == "Consulta Matinal Dr. Roberto"
+
+    # Consulta os lembretes criados via API
+    res_reminders = await api_client.get("/api/v1/reminders", headers=headers)
+    assert res_reminders.status_code == 200
+    reminders = res_reminders.json()
+    assert len(reminders) >= 1
+
+    rem = next(r for r in reminders if r["event_id"] == ev_data["id"])
+    assert "07h" in rem["message_text"]
+    assert "10h" not in rem["message_text"]
+
+    send_at_dt = datetime.fromisoformat(rem["send_at"])
+    send_at_sp = send_at_dt.astimezone(sp_tz) if send_at_dt.tzinfo else send_at_dt.replace(tzinfo=sp_tz)
+    assert send_at_sp.hour == 6
+    assert send_at_sp.minute == 0
+
+    # 2. Evento enviado com string ISO UTC (como gerado por new Date().toISOString() no navegador)
+    # 12:00 UTC em America/Sao_Paulo (UTC-3) corresponde a 09:00 BRT
+    payload_utc = {
+        "title": "Exame de Sangue Laboratório",
+        "start_time": "2026-10-30T12:00:00Z",
+        "end_time": "2026-10-30T12:30:00Z",
+        "reminder_minutes_before": 60,
+    }
+
+    res_utc = await api_client.post("/api/v1/events", json=payload_utc, headers=headers)
+    assert res_utc.status_code == 201
+    ev_utc = res_utc.json()
+
+    res_reminders2 = await api_client.get("/api/v1/reminders", headers=headers)
+    reminders2 = res_reminders2.json()
+    rem2 = next(r for r in reminders2 if r["event_id"] == ev_utc["id"])
+
+    assert "09h" in rem2["message_text"]
+    send_at_utc = datetime.fromisoformat(rem2["send_at"])
+    send_at_utc_sp = send_at_utc.astimezone(sp_tz) if send_at_utc.tzinfo else send_at_utc.replace(tzinfo=sp_tz)
+    assert send_at_utc_sp.hour == 8
+    assert send_at_utc_sp.minute == 0

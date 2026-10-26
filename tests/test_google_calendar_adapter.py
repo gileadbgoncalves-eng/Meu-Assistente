@@ -138,3 +138,26 @@ async def test_google_calendar_adapter_list_events_fallback():
     events = await adapter.list_events(now, now + timedelta(days=7))
     assert isinstance(events, list)
 
+
+def test_google_calendar_adapter_maps_attendees_with_email():
+    """Valida que os participantes com e-mail são mapeados para o array attendees do Google."""
+    from app.domain.entities import EventParticipant
+
+    adapter = GoogleCalendarAdapter()
+    event = Event(
+        owner_user_id=1,
+        title="Reunião com Parceiros",
+        start_time=datetime(2026, 10, 28, 10, 0),
+        end_time=datetime(2026, 10, 28, 11, 0),
+        participants=[
+            EventParticipant(name="Alice Silva", email="alice@empresa.com"),
+            EventParticipant(name="Bob Souza", email=None),
+        ],
+    )
+    payload = adapter._convert_to_google_payload(event)
+    attendees = payload["attendees"]
+    assert len(attendees) == 2
+    assert attendees[0] == {"displayName": "Alice Silva", "email": "alice@empresa.com"}
+    assert attendees[1] == {"displayName": "Bob Souza"}
+
+

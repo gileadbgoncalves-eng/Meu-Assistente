@@ -138,43 +138,73 @@
   <div id="event-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4">
     <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative">
       <div class="flex items-center justify-between">
-        <h4 class="text-lg font-semibold text-white">Criar Novo Compromisso</h4>
+        <h4 id="event-modal-title" class="text-lg font-semibold text-white">Criar Novo Compromisso</h4>
         <button onclick="closeEventModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
       </div>
 
       <!-- Conflict Alert Banner -->
       <div id="event-conflict-banner" class="hidden p-3 rounded-xl bg-red-950/80 border border-red-800 text-red-200 text-xs"></div>
 
+      <!-- Tabs Navigation -->
+      <div class="flex border-b border-slate-800 gap-2">
+        <button type="button" id="tab-btn-details" onclick="switchEventTab('details')" class="pb-2 text-xs font-semibold text-emerald-400 border-b-2 border-emerald-500 transition px-2">
+          📋 Aba 1: Detalhes
+        </button>
+        <button type="button" id="tab-btn-involved" onclick="switchEventTab('involved')" class="pb-2 text-xs font-semibold text-slate-400 hover:text-white border-b-2 border-transparent transition px-2">
+          👥 Aba 2: Envolvidos
+        </button>
+      </div>
+
       <form id="event-form" onsubmit="handleCreateEvent(event)" class="space-y-3">
-        <div>
-          <label class="block text-xs font-medium text-slate-300 mb-1">Título do Compromisso *</label>
-          <input type="text" id="ev-title" required placeholder="Ex: Consulta com Dr. Roberto" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+        <!-- Aba 1: Detalhes -->
+        <div id="event-tab-details" class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Título do Compromisso *</label>
+            <input type="text" id="ev-title" required placeholder="Ex: Consulta com Dr. Roberto" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Início *</label>
+              <input type="datetime-local" id="ev-start" required class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Término *</label>
+              <input type="datetime-local" id="ev-end" required class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Local / Endereço</label>
+            <input type="text" id="ev-location" placeholder="Ex: Av. Paulista, 1000 - Bela Vista" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Deslocamento (min)</label>
+              <input type="number" id="ev-travel" placeholder="Ex: 25" class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Lembrete Antes (min)</label>
+              <input type="number" id="ev-reminder" value="60" class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+            </div>
+          </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <!-- Aba 2: Envolvidos -->
+        <div id="event-tab-involved" class="space-y-3 hidden">
           <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Início *</label>
-            <input type="datetime-local" id="ev-start" required class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+            <label class="block text-xs font-medium text-slate-300 mb-1">Contato Principal (ex: Consultório / Local)</label>
+            <select id="ev-main-contact" class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+              <option value="">Nenhum contato principal selecionado</option>
+            </select>
           </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Término *</label>
-            <input type="datetime-local" id="ev-end" required class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
-          </div>
-        </div>
 
-        <div>
-          <label class="block text-xs font-medium text-slate-300 mb-1">Local / Endereço</label>
-          <input type="text" id="ev-location" placeholder="Ex: Av. Paulista, 1000 - Bela Vista" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Deslocamento (min)</label>
-            <input type="number" id="ev-travel" placeholder="Ex: 25" class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Lembrete Antes (min)</label>
-            <input type="number" id="ev-reminder" value="60" class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+            <label class="block text-xs font-medium text-slate-300 mb-1">Participantes Adicionais (Notificados por WhatsApp/E-mail)</label>
+            <div id="ev-participants-list" class="space-y-1.5 max-h-48 overflow-y-auto pr-1 rounded-xl bg-slate-950/40 p-2 border border-slate-800">
+              <div class="text-[11px] text-slate-500 py-2 text-center">Nenhum contato cadastrado ainda.</div>
+            </div>
           </div>
         </div>
 
@@ -225,11 +255,51 @@
 
   <script>
     let allContacts = [];
+    let cachedEvents = [];
+    let editingEventId = null;
 
     // Helper de formatação de data
     function formatDate(isoStr) {
       const d = new Date(isoStr);
       return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function switchEventTab(tab) {
+      const tabDetails = document.getElementById('event-tab-details');
+      const tabInvolved = document.getElementById('event-tab-involved');
+      const btnDetails = document.getElementById('tab-btn-details');
+      const btnInvolved = document.getElementById('tab-btn-involved');
+
+      if (tab === 'details') {
+        tabDetails.classList.remove('hidden');
+        tabInvolved.classList.add('hidden');
+        btnDetails.className = 'pb-2 text-xs font-semibold text-emerald-400 border-b-2 border-emerald-500 transition px-2';
+        btnInvolved.className = 'pb-2 text-xs font-semibold text-slate-400 hover:text-white border-b-2 border-transparent transition px-2';
+      } else {
+        tabDetails.classList.add('hidden');
+        tabInvolved.classList.remove('hidden');
+        btnDetails.className = 'pb-2 text-xs font-semibold text-slate-400 hover:text-white border-b-2 border-transparent transition px-2';
+        btnInvolved.className = 'pb-2 text-xs font-semibold text-emerald-400 border-b-2 border-emerald-500 transition px-2';
+      }
+    }
+
+    function renderContactsInModal(selectedMainId = null, selectedParticipantIds = []) {
+      const mainSelect = document.getElementById('ev-main-contact');
+      mainSelect.innerHTML = '<option value="">Nenhum contato principal selecionado</option>' +
+        allContacts.map(c => `<option value="${c.id}" ${c.id === selectedMainId ? 'selected' : ''}>${c.name} ${c.phone ? '(' + c.phone + ')' : ''}</option>`).join('');
+
+      const partList = document.getElementById('ev-participants-list');
+      if (allContacts.length === 0) {
+        partList.innerHTML = '<div class="text-[11px] text-slate-500 py-2 text-center">Nenhum contato cadastrado ainda.</div>';
+        return;
+      }
+      partList.innerHTML = allContacts.map(c => `
+        <label class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-800/80 cursor-pointer text-xs text-slate-300">
+          <input type="checkbox" value="${c.id}" ${selectedParticipantIds.includes(c.id) ? 'checked' : ''} class="ev-participant-checkbox rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0">
+          <span>${c.name}</span>
+          <span class="text-[10px] text-slate-500">${c.phone || c.email || ''}</span>
+        </label>
+      `).join('');
     }
 
     async function loadBriefing() {
@@ -254,6 +324,7 @@
           return;
         }
         const events = await res.json();
+        cachedEvents = events;
         document.getElementById('events-count').innerText = events.length;
 
         if (events.length === 0) {
@@ -265,7 +336,10 @@
           return;
         }
 
-        container.innerHTML = events.map(ev => `
+        container.innerHTML = events.map(ev => {
+          const mainContact = allContacts.find(c => c.id === (ev.main_contact_id || ev.contact_id));
+          const partCount = (ev.participant_ids || []).length;
+          return `
           <div class="rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
             <div class="space-y-1">
               <div class="flex items-center gap-2 flex-wrap">
@@ -274,15 +348,22 @@
                 </span>
                 ${ev.travel_time_minutes ? `<span class="text-xs text-amber-300 bg-amber-950/40 border border-amber-800 px-2 py-0.5 rounded-full">🚗 ~${ev.travel_time_minutes} min</span>` : ''}
                 ${ev.external_calendar_id ? `<span class="text-xs text-blue-400 bg-blue-950/30 border border-blue-900 px-2 py-0.5 rounded-full">G-Calendar</span>` : ''}
+                ${mainContact ? `<span class="text-xs text-purple-300 bg-purple-950/40 border border-purple-800 px-2 py-0.5 rounded-full">👤 ${mainContact.name}</span>` : ''}
+                ${partCount > 0 ? `<span class="text-xs text-cyan-300 bg-cyan-950/40 border border-cyan-800 px-2 py-0.5 rounded-full">👥 ${partCount} participante(s)</span>` : ''}
               </div>
               <h4 class="text-base font-semibold text-white">${ev.title}</h4>
               ${ev.location ? `<p class="text-xs text-slate-400 flex items-center gap-1">📍 ${ev.location}</p>` : ''}
             </div>
-            <button onclick="deleteEvent(${ev.id})" class="text-xs px-3 py-1.5 rounded-lg border border-red-900/50 text-red-400 hover:bg-red-950/40 transition self-start md:self-center">
-              Cancelar
-            </button>
+            <div class="flex items-center gap-2 self-start md:self-center">
+              <button onclick="editEvent(${ev.id})" class="text-xs px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:text-white hover:border-slate-600 transition flex items-center gap-1">
+                ✏️ Editar
+              </button>
+              <button onclick="deleteEvent(${ev.id})" class="text-xs px-3 py-1.5 rounded-lg border border-red-900/50 text-red-400 hover:bg-red-950/40 transition">
+                Cancelar
+              </button>
+            </div>
           </div>
-        `).join('');
+        `}).join('');
       } catch (e) {
         console.error(e);
       }
@@ -350,14 +431,48 @@
     }
 
     function openEventModal() {
+      editingEventId = null;
+      document.getElementById('event-modal-title').innerText = 'Criar Novo Compromisso';
+      document.getElementById('event-form').reset();
+      document.getElementById('event-conflict-banner').classList.add('hidden');
+      renderContactsInModal();
+      switchEventTab('details');
       document.getElementById('event-modal').classList.remove('hidden');
       document.getElementById('event-modal').classList.add('flex');
-      document.getElementById('event-conflict-banner').classList.add('hidden');
     }
 
     function closeEventModal() {
       document.getElementById('event-modal').classList.add('hidden');
       document.getElementById('event-modal').classList.remove('flex');
+      editingEventId = null;
+    }
+
+    function editEvent(id) {
+      const ev = cachedEvents.find(e => e.id === id);
+      if (!ev) return;
+      editingEventId = id;
+      document.getElementById('event-modal-title').innerText = 'Editar Compromisso';
+      document.getElementById('event-conflict-banner').classList.add('hidden');
+
+      document.getElementById('ev-title').value = ev.title || '';
+      const toLocalInput = (iso) => {
+        const d = new Date(iso);
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      };
+      document.getElementById('ev-start').value = toLocalInput(ev.start_time);
+      document.getElementById('ev-end').value = toLocalInput(ev.end_time);
+      document.getElementById('ev-location').value = ev.location || '';
+      document.getElementById('ev-travel').value = ev.travel_time_minutes || '';
+      document.getElementById('ev-reminder').value = 60;
+
+      const mainId = ev.main_contact_id || ev.contact_id || null;
+      const partIds = ev.participant_ids || [];
+      renderContactsInModal(mainId, partIds);
+      switchEventTab('details');
+
+      document.getElementById('event-modal').classList.remove('hidden');
+      document.getElementById('event-modal').classList.add('flex');
     }
 
     function openContactModal() {
@@ -372,21 +487,31 @@
 
     async function handleCreateEvent(e) {
       e.preventDefault();
+      const checkedBoxes = Array.from(document.querySelectorAll('.ev-participant-checkbox:checked'));
+      const participantIds = checkedBoxes.map(cb => parseInt(cb.value));
+      const mainContactVal = document.getElementById('ev-main-contact').value;
+
       const payload = {
         title: document.getElementById('ev-title').value,
-        start_time: new Date(document.getElementById('ev-start').value).toISOString(),
-        end_time: new Date(document.getElementById('ev-end').value).toISOString(),
+        start_time: document.getElementById('ev-start').value,
+        end_time: document.getElementById('ev-end').value,
         location: document.getElementById('ev-location').value || null,
         travel_time_minutes: document.getElementById('ev-travel').value ? parseInt(document.getElementById('ev-travel').value) : null,
-        reminder_minutes_before: parseInt(document.getElementById('ev-reminder').value) || 60
+        reminder_minutes_before: parseInt(document.getElementById('ev-reminder').value) || 60,
+        main_contact_id: mainContactVal ? parseInt(mainContactVal) : null,
+        contact_id: mainContactVal ? parseInt(mainContactVal) : null,
+        participant_ids: participantIds
       };
 
       const btn = document.getElementById('btn-save-event');
       btn.disabled = true;
-      btn.innerText = 'Verificando conflitos...';
+      btn.innerText = editingEventId ? 'Atualizando...' : 'Verificando conflitos...';
 
-      const res = await fetch('/api/v1/events', {
-        method: 'POST',
+      const url = editingEventId ? `/api/v1/events/${editingEventId}` : '/api/v1/events';
+      const method = editingEventId ? 'PATCH' : 'POST';
+
+      const res = await fetch(url, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -399,12 +524,14 @@
         const banner = document.getElementById('event-conflict-banner');
         banner.innerText = '⚠️ Conflito Detectado: ' + (err.detail || err.error?.message || 'Existe um compromisso neste horário.');
         banner.classList.remove('hidden');
+        switchEventTab('details');
         return;
       }
 
       if (res.ok) {
         closeEventModal();
         document.getElementById('event-form').reset();
+        editingEventId = null;
         await loadEvents();
         await loadBriefing();
         await loadReminders();
@@ -442,10 +569,10 @@
     }
 
     // Inicialização
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
+      await loadContacts();
       loadBriefing();
       loadEvents();
-      loadContacts();
       loadReminders();
     });
   </script>
