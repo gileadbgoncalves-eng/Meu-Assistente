@@ -66,6 +66,8 @@ class ConversationStateManager:
             lines.append(f"{prefix}: {msg['text']}")
         return "\n".join(lines)
 
+    format_context = get_recent_history_context
+
     def set_pending(self, user_id: int, proposal: PendingProposal) -> None:
         """Registra uma proposta pendente para o usuário."""
         self._pending_proposals[user_id] = proposal

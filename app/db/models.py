@@ -59,11 +59,25 @@ class ContactModel(Base):
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
     phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     owner: Mapped["UserModel"] = relationship("UserModel", back_populates="contacts")
+
+    @property
+    def user_id(self) -> int:
+        return self.owner_user_id
+
+    @property
+    def phone(self) -> str | None:
+        return self.phone_number
+
+    __table_args__ = (
+        Index("ix_contacts_owner_name", "owner_user_id", "name"),
+    )
 
 
 class LocationModel(Base):
@@ -91,6 +105,8 @@ class EventModel(Base):
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), default="America/Sao_Paulo", nullable=False)
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
+    location_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default=EventStatus.DRAFT.value, index=True, nullable=False)
     confidence_score: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
 
@@ -100,6 +116,7 @@ class EventModel(Base):
     sync_status: Mapped[str] = mapped_column(String(32), default=SyncStatus.NOT_SYNCED.value, nullable=False)
 
     # Campos de integração futura com trânsito e rotas (Google Maps)
+    travel_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_travel_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
@@ -206,3 +223,22 @@ class MessageProcessingModel(Base):
     detected_intent: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="received", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+# Aliases para compatibilidade total com nomenclatura ORM
+UserModelOrm = UserModel
+UserOrm = UserModel
+EventModelOrm = EventModel
+EventOrm = EventModel
+ContactModelOrm = ContactModel
+ContactOrm = ContactModel
+ReminderModelOrm = ReminderModel
+ReminderOrm = ReminderModel
+LocationModelOrm = LocationModel
+LocationOrm = LocationModel
+EventParticipantModelOrm = EventParticipantModel
+EventParticipantOrm = EventParticipantModel
+ChangeLogModelOrm = ChangeLogModel
+ChangeLogOrm = ChangeLogModel
+MessageProcessingModelOrm = MessageProcessingModel
+MessageProcessingOrm = MessageProcessingModel

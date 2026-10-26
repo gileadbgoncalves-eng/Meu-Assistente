@@ -73,3 +73,38 @@ class DataSanitizer:
         if len(secret) <= (show_prefix + show_suffix):
             return "***"
         return f"{secret[:show_prefix]}...{secret[-show_suffix:]}"
+
+
+class ExecutiveBriefingFormatter:
+    """Formatador de briefing executivo diário e resumo estruturado da agenda."""
+
+    @classmethod
+    def format_briefing(
+        cls,
+        user_name: str,
+        target_date: datetime,
+        events: list,
+    ) -> str:
+        """Gera texto amigável e profissional com o briefing diário."""
+        date_str = BrazilianDateTimeFormatter.format_date(target_date)
+        if not events:
+            return f"☀️ *Bom dia, {user_name}!* 🗓️ *{date_str}*\n\n🎉 Você não tem compromissos agendados para este dia. Sua agenda está 100% livre!"
+
+        count = len(events)
+        header = f"☀️ *Briefing Executivo do Dia* | {user_name}\n📅 *{date_str}* — {count} compromisso{'s' if count > 1 else ''}:\n"
+        lines = [header]
+
+        for i, ev in enumerate(events, 1):
+            h_start = BrazilianDateTimeFormatter.format_time(ev.start_time)
+            h_end = BrazilianDateTimeFormatter.format_time(ev.end_time)
+            loc = getattr(ev, "location_name", None) or (
+                ev.location.raw_address if getattr(ev, "location", None) and hasattr(ev.location, "raw_address") else None
+            )
+            loc_str = f" 📍 {loc}" if loc else ""
+            travel = getattr(ev, "travel_time_minutes", None) or getattr(ev, "estimated_travel_minutes", None)
+            travel_str = f" [🚗 ~{travel} min]" if travel else ""
+            lines.append(f"{i}. *{h_start} - {h_end}*: {ev.title}{loc_str}{travel_str}")
+
+        lines.append("\n💡 Tenha um excelente dia!")
+        return "\n".join(lines)
+

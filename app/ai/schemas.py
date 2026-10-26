@@ -111,4 +111,35 @@ class AIInterpretationResult(BaseModel):
         default=None,
         description="Descrição textual do lembrete (ex: 'Tomar remédio', 'Ligar para João')",
     )
+    location: str | None = Field(
+        default=None,
+        description="Endereço físico ou local do evento",
+    )
+
+    def model_post_init(self, __context) -> None:
+        if self.location is None and self.location_raw is not None:
+            self.location = self.location_raw
+        elif self.location_raw is None and self.location is not None:
+            self.location_raw = self.location
+
+
+class ExtractedEventData(BaseModel):
+    """Dados de evento extraídos estruturadamente da mensagem."""
+    title: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    location: str | None = None
+    location_raw: str | None = None
+    participants: list[str] = Field(default_factory=list)
+
+
+class ExtractedReminderData(BaseModel):
+    """Dados de lembrete extraídos estruturadamente."""
+    message: str | None = None
+    trigger_datetime: str | None = None
+    minutes_before: int | None = None
+    event_reference: str | None = None
+
+
+ParsedIntent = AIInterpretationResult
 

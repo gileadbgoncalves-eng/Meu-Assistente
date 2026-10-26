@@ -34,7 +34,13 @@ class IntentType(StrEnum):
     ADD_PARTICIPANT = "add_participant"
     REPLACE_PARTICIPANT = "replace_participant"
     REMINDER_REQUEST = "reminder_request"
+    CREATE_CONTACT = "create_contact"
+    QUERY_CONTACTS = "query_contacts"
+    MANAGE_CONTACT = "manage_contact"
     UNKNOWN = "unknown"
+
+
+IntentEnum = IntentType
 
 
 class ConfidenceLevel(StrEnum):

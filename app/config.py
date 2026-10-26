@@ -76,6 +76,8 @@ class Settings(BaseSettings):
 
     # Futuras integrações (Google Agenda & Maps)
     GOOGLE_CALENDAR_CREDENTIALS_FILE: str = ""
+    GOOGLE_CALENDAR_CREDENTIALS_JSON: str = ""
+    GOOGLE_CALENDAR_TOKEN: str = ""
     GOOGLE_MAPS_API_KEY: str = ""
 
 

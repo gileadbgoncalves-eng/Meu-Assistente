@@ -1,33 +1,38 @@
-# 🤖 Meu Assistente (MVP de Agenda Pessoal via WhatsApp)
+# 🤖 Meu Assistente (v0.3.0-RC: Secretário Executivo & Agenda Inteligente)
 
-Assistente pessoal de rotina e compromissos operando principalmente via WhatsApp (ou pelo simulador interativo de linha de comando no terminal). O sistema utiliza **Google Gemini** para extração semântica profunda e um **motor determinístico de validação** com banco relacional e trilha de auditoria append-only.
+Assistente pessoal de rotina, contatos e compromissos operando via **WhatsApp Cloud API**, **Painel Web Executivo** (`/painel`), **REST API v1** e **Simulador CLI Interativo**.
 
----
-
-## 🎯 Arquitetura e Princípios Centrais
-
-1. **Separação Estrita de Camadas**:
-   - A IA (`GeminiInterpreter`) é tratada como um motor semântico que produz saídas estruturadas estritas (`AIInterpretationResult` via Pydantic v2).
-   - A IA **nunca** executa SQL nem altera diretamente o banco de dados.
-2. **Validação Determinística**:
-   - Fuso horário gerenciado via `zoneinfo` (`America/Sao_Paulo`) sem erros de virada de mês/ano ou ano bissexto.
-   - Algoritmo matemático para detecção de sobreposição de intervalos semiabertos $[início, fim)$.
-3. **Máquina de Estados e Confirmação Obrigatória**:
-   - Operações sensíveis (conflitos de agenda, reagendamento ou cancelamento) exigem confirmação explícita (*"sim"*, *"pode agendar"*, *"beleza"*).
-4. **Persistência Relacional e Auditoria Imutável**:
-   - SQLAlchemy 2.0 Async + SQLite (dev/testes) e PostgreSQL com `asyncpg` (produção).
-   - Tabela `change_log` append-only que registra o que mudou, quando, por quem e qual o motivo.
-   - Tabela `message_processing` para idempotência absoluta de webhooks e mensagens repetidas.
-5. **Portas Abertas para Futuras Integrações**:
-   - Interfaces e adaptadores prontos para **Google Agenda** (`GoogleCalendarAdapter`) e **Google Maps Platform** (`GoogleMapsAdapter`).
-6. **Canal WhatsApp Cloud API Oficial**:
-   - Endpoint FastAPI com handshake Meta (`GET /webhook`), assinatura criptográfica `X-Hub-Signature-256` e despacho assíncrono em `BackgroundTasks` (`POST /webhook`).
+O sistema combina inteligência artificial generativa multimodal (**Google Gemini 2.5 Flash**) para extração semântica profunda e transcrição de voz com um **motor determinístico de regras de negócio**, detecção algorítmica de conflitos, análise de viabilidade logística de trânsito (**Google Maps**), sincronização híbrida com **Google Calendar** e persistência relacional com trilha de auditoria append-only.
 
 ---
 
-## ⚡ Smoke Test de Integridade (2 Segundos)
+## 🌟 Principais Recursos e Diferenciais (v0.3.0-RC)
 
-Para verificar rapidamente se todos os subsistemas (IA, Banco, Motor de Regras e Webhook) estão operacionais antes de iniciar:
+1. **Mensagens de Áudio & IA Multimodal (WhatsApp)**:
+   - Recebe áudios no WhatsApp, realiza download seguro e transcreve/interpreta via Gemini Multimodal diretamente no pipeline determinístico.
+2. **Dashboard Web Embutido (`/painel`)**:
+   - Interface Tailwind CSS moderna, responsiva e com tema escuro servida nativamente pelo FastAPI, sem dependências de build Node.js.
+   - Cards de compromissos com indicador de deslocamento, modal de criação rápida com alerta de conflito em tempo real, agenda de contatos com busca instantânea e status de lembretes.
+3. **API REST v1 Completa (`/api/v1/*`)**:
+   - Endpoints completos para `events` (com validação e retorno HTTP 409 em sobreposições), `contacts` (CRUD completo), `reminders`, `briefing` e `status`.
+   - Multi-tenant isolado por usuário (`X-User-Phone` ou query param, com fallback de desenvolvimento).
+4. **Briefing Executivo Matinal ("Resumo do Dia")**:
+   - Gera resumos diários elegantes e estruturados via comando conversacional (*"Resumo do meu dia"*, *"Briefing de hoje"*), pela API REST ou pelo Worker Assíncrono proativo.
+5. **Inteligência Logística de Deslocamento (Google Maps)**:
+   - Estimativa de tempo de trânsito e verificação de viabilidade entre compromissos sequenciais (`ConflictSeverity.LOGISTIC_RISK`), alertando o usuário e enriquecendo lembretes com dicas de trajeto (*"🚗 Deslocamento estimado: ~25 min"*).
+6. **Sincronização Híbrida com Google Calendar**:
+   - Integração bidirecional resiliente: opera com credenciais reais ou em modo de *Fallback Gracioso Local* com identificadores sintéticos (`gcal_local_*`), garantindo que o sistema nunca caia por instabilidade externa.
+7. **Motor Determinístico & Confirmação Humana (Human-in-the-Loop)**:
+   - Nenhuma decisão crítica ou gravação de conflito é feita pela IA. Conflitos de horário exigem confirmação explícita (*"sim"*, *"pode agendar"*).
+8. **Persistência Relacional e Auditoria Imutável**:
+   - SQLAlchemy 2.0 Async + SQLite (dev/testes) ou PostgreSQL (`asyncpg`).
+   - Tabela `change_log` append-only para auditoria total e `message_processing` para idempotência absoluta.
+
+---
+
+## ⚡ Smoke Test de Integridade Sub-Segundo (< 0.1s)
+
+Para validar a integridade de todos os 5 subsistemas em menos de 100 milissegundos:
 
 ```powershell
 .\.venv\Scripts\python.exe smoke_test.py
@@ -35,85 +40,75 @@ Para verificar rapidamente se todos os subsistemas (IA, Banco, Motor de Regras e
 
 Saída esperada:
 ```
-🔍 Iniciando Smoke Test do Meu Assistente...
-  [1/4] Verificando Banco de Dados e Auditoria... OK ✅
-  [2/4] Verificando Motor Determinístico de Regras e Conflitos... OK ✅
-  [3/4] Verificando Camada de IA e Esquemas Tipados... OK ✅
-  [4/4] Verificando Endpoints FastAPI e Webhook WhatsApp... OK ✅
+🔍 Iniciando Smoke Test do Meu Assistente (v0.3.0-RC)...
+  [1/5] Verificando Banco de Dados, Contatos e Auditoria... OK ✅
+  [2/5] Verificando Motor Determinístico e Logística de Trânsito... OK ✅
+  [3/5] Verificando Camada de IA e Esquemas Tipados... OK ✅
+  [4/5] Verificando Formatador de Briefing Executivo... OK ✅
+  [5/5] Verificando Endpoints FastAPI, Webhook e Web API... OK ✅
 --------------------------------------------------------------------------------
-🚀 [STATUS]: Todos os subsistemas (IA, Banco, Motor de Regras, Webhook) estão operacionais e prontos para teste.
+✨ Smoke Test concluído com sucesso em 0.095s! Todos os 5 subsistemas operacionais.
 ```
 
 ---
 
-## 📋 Roteiro de Validação do Usuário (Passo a Passo)
+## 🖥️ Como Acessar o Dashboard Web e a API
 
-Siga este roteiro prático no PowerShell para experimentar todos os recursos do assistente de ponta a ponta:
-
-### 1. Iniciar o Simulador Conversacional
-No terminal PowerShell, execute:
+Inicie o servidor local:
 
 ```powershell
-# Com Gemini Real (requer GEMINI_API_KEY no .env):
-.\.venv\Scripts\python.exe simulator.py
-
-# Ou no modo Mock Offline (rápido e sem gastar cota):
-.\.venv\Scripts\python.exe simulator.py --mock
-```
-
-### 2. Cenários de Teste Sugeridos (Envie no prompt do simulador)
-
-#### Cenário A: Criação Direta sem Conflito
-> **Você digita**: `Dentista amanhã às 14h na Rua Oscar Freire`  
-> **Resultado esperado**: O assistente agenda o evento diretamente e exibe o resumo com data, horário (14h às 15h) e local.
-
-#### Cenário B: Detecção de Conflito Proposital com Confirmação
-> **Você digita**: `Reunião de equipe amanhã às 14h30`  
-> **Resultado esperado**: O assistente **não grava de imediato**, identifica o conflito com a consulta do dentista e pergunta: *"Aviso de conflito: você já tem 'Dentista' marcado das 14h às 15h... Deseja manter mesmo com a sobreposição ou prefere outro horário?"*  
-> **Você confirma**: `sim, pode agendar`  
-> **Resultado esperado**: O assistente confirma a gravação de ambos os compromissos no banco.
-
-#### Cenário C: Ambiguidade Severa (Sem Horário)
-> **Você digita**: `Consulta com nutricionista na sexta-feira`  
-> **Resultado esperado**: O assistente **não adivinha** o horário. Ele pergunta: *"Qual é o horário da sua consulta na sexta-feira?"*
-
-#### Cenário D: Consulta de Agenda
-> **Você digita**: `O que tenho amanhã?`  
-> **Resultado esperado**: O assistente lista os compromissos cadastrados para o dia seguinte de forma limpa.
-
-#### Cenário E: Lembretes Automáticos, Relativos e Avulsos
-> **Você digita**: `médico dia 30/10/2026 às 07:00 da manhã.`  
-> **Resultado esperado**: O assistente agenda na data e hora exatas com lembrete padrão (60 min antes): *"🔔 Lembrete configurado para 30/10 às 06h (1h antes)."*  
-> **Você digita**: `me lembra de tomar remédio daqui a 1h`  
-> **Resultado esperado**: O assistente confirma lembrete avulso com disparo daqui a 1 hora.
-
-### 3. Comandos Utilitários no Terminal
-- `/agenda` → Exibe em formato tabular todos os eventos gravados no banco relacional.
-- `/lembretes` → Exibe todos os lembretes pendentes (avulsos ou vinculados a eventos).
-- `/auditoria` → Exibe os registros imutáveis de `change_log` comprovando que toda criação/atualização possui rastreabilidade.
-- `/limpar` → Reseta as propostas pendentes da conversa.
-- `/sair` → Finaliza a sessão do simulador.
-
----
-
-## 🚀 Como Executar o Servidor FastAPI (Webhook WhatsApp)
-
-Para receber mensagens reais via WhatsApp Cloud API (Meta for Developers):
-
-```powershell
-# Inicia o servidor ASGI na porta 8000
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-- Documentação Swagger interativa: [http://localhost:8000/docs](http://localhost:8000/docs)
-- Endpoint de Webhook para a Meta: `http://seu-dominio.com/webhook`
+- **Painel Web Executivo**: [http://localhost:8000/painel](http://localhost:8000/painel) (ou `/dashboard`)
+- **Documentação Interativa Swagger**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **API REST de Eventos**: `GET/POST /api/v1/events`
+- **API REST de Contatos**: `GET/POST/PUT/DELETE /api/v1/contacts`
+- **API REST de Briefing**: `GET /api/v1/briefing`
+- **Webhook WhatsApp**: `GET/POST /webhook`
 
 ---
 
-## 🧪 Como Rodar a Suíte Completa de Testes
+## 💬 Como Usar o Simulador CLI no Terminal
 
-A suíte possui **48 testes automatizados** cobrindo subsistema de lembretes, isolamento de usuários, regras de conflito, viradas de mês/ano, anos bissextos, mensagens ambíguas, injeção de prompt, idempotência, webhooks e adaptadores externos:
+O simulador de terminal permite testar toda a experiência conversacional sem depender da Meta:
+
+```powershell
+# Modo Mock Offline (rápido, sem consumo de API do Gemini):
+.\.venv\Scripts\python.exe -m app.channels.simulator --mock
+
+# Modo com Gemini Real (requer GEMINI_API_KEY no .env):
+.\.venv\Scripts\python.exe -m app.channels.simulator
+```
+
+### Comandos Rápidos Disponíveis no CLI:
+- `/agenda` → Lista compromissos salvos no banco.
+- `/contatos` → Lista os contatos salvos.
+- `/briefing` → Exibe o resumo executivo matinal do dia.
+- `/lembretes` → Exibe os lembretes programados.
+- `/painel` → Exibe a URL do Painel Web Executivo.
+- `/auditoria` → Exibe o histórico de alterações (`change_log`).
+- `/limpar` → Reseta as propostas pendentes da sessão.
+- `/sair` → Encerra o simulador.
+
+### Exemplos de Interações Conversacionais:
+- *"Dentista amanhã às 14h na Av Paulista 1000"* (Criação de evento com local).
+- *"Salvar contato Dr. Roberto 21999998888"* (Cadastro rápido de contato).
+- *"Qual o telefone do Dr. Roberto?"* (Consulta inteligente de contato).
+- *"Resumo do meu dia"* (Briefing executivo com tempos de deslocamento e horários).
+- *"Me lembre desse compromisso 2h antes"* (Lembrete relativo anafórico).
+
+---
+
+## 🧪 Suíte de Testes Automatizados (Pytest)
+
+A suíte conta com **97 testes automatizados** (100% assíncronos e isolados em memória):
 
 ```powershell
 .\.venv\Scripts\pytest.exe -v
+```
+
+Verificação de estilo e linter (Ruff):
+```powershell
+.\.venv\Scripts\ruff.exe check .
 ```

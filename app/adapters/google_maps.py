@@ -21,17 +21,18 @@ class GoogleMapsAdapter(TravelTimeEstimatorPort):
         self,
         origin: str,
         destination: str,
-        departure_time: datetime,
+        departure_time: datetime | None = None,
         mode: str = "driving",
     ) -> TravelEstimate:
         """Calcula a estimativa de viagem e trânsito com suporte a fallback gracioso."""
+        dep_time = departure_time or datetime.now()
         if not self.api_key or self.api_key in {"AIzaSy...", "sua_chave"}:
             # Fallback aproximado se a chave não estiver configurada
             logger.info("Chave do Google Maps não configurada. Usando estimativa aproximada de trânsito.")
             return TravelEstimate(
                 origin_address=origin,
                 destination_address=destination,
-                departure_time=departure_time,
+                departure_time=dep_time,
                 mode=mode,
                 duration_minutes=35,
                 distance_meters=12000,
@@ -42,7 +43,7 @@ class GoogleMapsAdapter(TravelTimeEstimatorPort):
 
         # Chamada à Google Maps Distance Matrix API
         url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-        departure_timestamp = int(departure_time.timestamp())
+        departure_timestamp = int(dep_time.timestamp())
         params = {
             "origins": origin,
             "destinations": destination,

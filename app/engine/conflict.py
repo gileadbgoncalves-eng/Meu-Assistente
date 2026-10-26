@@ -14,6 +14,7 @@ class ConflictSeverity(StrEnum):
     NONE = "none"
     ADJACENT = "adjacent"          # Evento colado (sem intervalo de descanso/deslocamento)
     DIRECT_OVERLAP = "overlap"     # Conflito real confirmado (horários colidem)
+    LOGISTIC_RISK = "logistic_risk"  # Risco de atraso por deslocamento/trânsito
 
 
 class ConflictReport(BaseModel):
@@ -113,3 +114,60 @@ class ConflictDetector:
             conflicting_events=conflicting_list,
             warning_message=warning,
         )
+
+    @classmethod
+    def check_travel_feasibility(
+        cls,
+        candidate_start: datetime,
+        candidate_end: datetime,
+        candidate_location: str | None,
+        existing_events: Sequence[EventModel],
+        travel_minutes: int = 0,
+    ) -> ConflictReport | None:
+        """Verifica se há tempo hábil de deslocamento entre o novo evento e os eventos existentes."""
+        if not candidate_location or travel_minutes <= 0:
+            return None
+
+        cand_start = cls.normalize_tz(candidate_start)
+        cand_end = cls.normalize_tz(candidate_end)
+
+        for event in existing_events:
+            if getattr(event, "status", None) == "cancelled":
+                continue
+
+            ev_start = cls.normalize_tz(event.start_time)
+            ev_end = cls.normalize_tz(event.end_time)
+
+            # Caso 1: Evento anterior termina antes do novo começar
+            if ev_end <= cand_start:
+                gap_minutes = int((cand_start - ev_end).total_seconds() / 60)
+                if gap_minutes < travel_minutes:
+                    warn = (
+                        f"⚠️ Risco de atraso por deslocamento: seu compromisso anterior '{event.title}' termina às "
+                        f"{cls.format_time_br(ev_end)} e o novo começa às {cls.format_time_br(cand_start)} "
+                        f"(intervalo de {gap_minutes} min, mas o trânsito estimado é de ~{travel_minutes} min)."
+                    )
+                    return ConflictReport(
+                        has_conflict=True,
+                        severity=ConflictSeverity.LOGISTIC_RISK,
+                        conflicting_events=[{"id": event.id, "title": event.title, "travel_minutes": travel_minutes}],
+                        warning_message=warn,
+                    )
+
+            # Caso 2: Evento seguinte começa depois que o novo termina
+            elif cand_end <= ev_start:
+                gap_minutes = int((ev_start - cand_end).total_seconds() / 60)
+                if gap_minutes < travel_minutes:
+                    warn = (
+                        f"⚠️ Risco de atraso por deslocamento: o novo compromisso termina às {cls.format_time_br(cand_end)} "
+                        f"e seu compromisso seguinte '{event.title}' começa às {cls.format_time_br(ev_start)} "
+                        f"(intervalo de {gap_minutes} min, mas o trânsito estimado é de ~{travel_minutes} min)."
+                    )
+                    return ConflictReport(
+                        has_conflict=True,
+                        severity=ConflictSeverity.LOGISTIC_RISK,
+                        conflicting_events=[{"id": event.id, "title": event.title, "travel_minutes": travel_minutes}],
+                        warning_message=warn,
+                    )
+
+        return None

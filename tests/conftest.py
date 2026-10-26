@@ -48,6 +48,26 @@ class MockGeminiInterpreter:
             extracted_facts=[raw_message],
         )
 
+    async def transcribe_and_interpret_audio(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/ogg",
+        context: list[str] | None = None,
+        anchor_datetime: datetime | None = None,
+        user_timezone: str = "America/Sao_Paulo",
+    ) -> tuple[str, AIInterpretationResult]:
+        text = "Dentista amanhã às 14h na Paulista"
+        if self.predefined_response and self.predefined_response.title:
+            text = self.predefined_response.title
+        interp = await self.interpret(
+            raw_message=text,
+            anchor_datetime=anchor_datetime or datetime.now(),
+            user_timezone=user_timezone,
+            recent_context="\n".join(context) if context else None,
+        )
+        return text, interp
+
+
 
 @pytest.fixture
 def mock_interpreter() -> MockGeminiInterpreter:

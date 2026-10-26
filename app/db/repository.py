@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import (
     ChangeLogModel,
+    ContactModel,
     EventModel,
     EventParticipantModel,
     LocationModel,
@@ -78,16 +79,22 @@ class EventRepository:
         status: str = EventStatus.DRAFT.value,
         confidence_score: float = 1.0,
         author_user_id: int | None = None,
+        location: str | None = None,
+        external_calendar_id: str | None = None,
+        travel_time_minutes: int | None = None,
+        contact_id: int | None = None,
     ) -> EventModel:
         author_id = author_user_id or owner_user_id
 
-        # Se houver localização, cria registro
+        # Se houver localização, cria registro e armazena texto
+        effective_location = location or location_address
+        loc_str = getattr(effective_location, "raw_address", effective_location) if effective_location else None
         location_id = None
-        if location_address:
-            location = LocationModel(raw_address=location_address)
-            self.session.add(location)
+        if loc_str:
+            loc_record = LocationModel(raw_address=str(loc_str))
+            self.session.add(loc_record)
             await self.session.flush()
-            location_id = location.id
+            location_id = loc_record.id
 
         event = EventModel(
             owner_user_id=owner_user_id,
@@ -97,6 +104,11 @@ class EventRepository:
             end_time=end_time,
             timezone=timezone,
             location_id=location_id,
+            location_name=str(loc_str) if loc_str else None,
+            contact_id=contact_id,
+            external_calendar_id=external_calendar_id,
+            travel_time_minutes=travel_time_minutes,
+            estimated_travel_minutes=travel_time_minutes,
             status=status,
             confidence_score=confidence_score,
         )
@@ -429,4 +441,95 @@ class ReminderRepository:
         if reminder:
             reminder.status = status_val
             await self.session.flush()
+
+
+class ContactRepository:
+    """Repositório de contatos com isolamento estrito por usuário."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(
+        self,
+        owner_user_id: int,
+        name: str,
+        phone: str | None = None,
+        email: str | None = None,
+        category: str | None = None,
+        notes: str | None = None,
+        user_id: int | None = None,
+    ) -> ContactModel:
+        actual_owner_id = user_id if user_id is not None else owner_user_id
+        contact = ContactModel(
+            owner_user_id=actual_owner_id,
+            name=name,
+            phone_number=phone,
+            email=email,
+            category=category,
+            notes=notes,
+        )
+        self.session.add(contact)
+        await self.session.flush()
+        return contact
+
+    async def get_by_id(self, contact_id: int, owner_user_id: int) -> ContactModel | None:
+        result = await self.session.execute(
+            select(ContactModel).where(
+                and_(
+                    ContactModel.id == contact_id,
+                    ContactModel.owner_user_id == owner_user_id,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def search_by_name(self, owner_user_id: int, query: str) -> list[ContactModel]:
+        stmt = (
+            select(ContactModel)
+            .where(
+                and_(
+                    ContactModel.owner_user_id == owner_user_id,
+                    ContactModel.name.ilike(f"%{query}%"),
+                )
+            )
+            .order_by(ContactModel.name.asc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_by_user(
+        self, owner_user_id: int, limit: int = 50, offset: int = 0
+    ) -> list[ContactModel]:
+        stmt = (
+            select(ContactModel)
+            .where(ContactModel.owner_user_id == owner_user_id)
+            .order_by(ContactModel.name.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def update(
+        self, contact_id: int, owner_user_id: int, **kwargs
+    ) -> ContactModel | None:
+        contact = await self.get_by_id(contact_id, owner_user_id=owner_user_id)
+        if not contact:
+            return None
+        if "phone" in kwargs and "phone_number" not in kwargs:
+            kwargs["phone_number"] = kwargs.pop("phone")
+        for key, value in kwargs.items():
+            if hasattr(contact, key):
+                setattr(contact, key, value)
+        await self.session.flush()
+        return contact
+
+    async def delete(self, contact_id: int, owner_user_id: int) -> bool:
+        contact = await self.get_by_id(contact_id, owner_user_id=owner_user_id)
+        if not contact:
+            return False
+        await self.session.delete(contact)
+        await self.session.flush()
+        return True
+
 

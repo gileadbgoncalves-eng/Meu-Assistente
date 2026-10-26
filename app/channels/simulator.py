@@ -266,6 +266,16 @@ class OfflineSimulatorMock(AIInterpreterProtocol):
                 confidence=ConfidenceLevel.MEDIUM,
             )
 
+        # Parsing de Localização (ex: "na Clínica São Vicente", "no escritório", etc.)
+        loc_val = None
+        m_loc = re.search(r"(?:n[ao]|em)\s+((?:cl[íi]nica|hospital|escrit[óo]rio|consult[óo]rio|sala|av\.?|rua)\s+[^\d,\n]+|\b[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõ]+(?:\s+[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõ]+)*)", raw_message, re.IGNORECASE)
+        if m_loc:
+            loc_val = m_loc.group(1).strip()
+        elif "na clínica" in text or "na clinica" in text:
+            loc_val = "Clínica São Vicente"
+        elif "no escritório" in text or "no escritorio" in text:
+            loc_val = "Escritório do Centro"
+
         start_dt = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
         end_dt = start_dt + timedelta(hours=1)
 
@@ -274,6 +284,8 @@ class OfflineSimulatorMock(AIInterpreterProtocol):
             title=title,
             start_datetime=start_dt.isoformat(),
             end_datetime=end_dt.isoformat(),
+            location_raw=loc_val,
+            location=loc_val,
             reminder_minutes_before=reminder_minutes_before,
             extracted_facts=[raw_message],
             confidence=ConfidenceLevel.HIGH,
@@ -292,6 +304,9 @@ BANNER = """
  COMANDOS RÁPIDOS:
    /agenda     -> Visualizar todos os compromissos salvos no banco
    /lembretes  -> Visualizar todos os lembretes configurados
+   /contatos   -> Visualizar contatos salvos no banco
+   /briefing   -> Exibir o resumo executivo matinal do dia
+   /painel     -> Exibir a URL do Painel Web Executivo (/painel)
    /auditoria  -> Ver o histórico append-only de alterações (change_log)
    /limpar     -> Resetar propostas pendentes e limpar memória da conversa
    /ajuda      -> Exibir esta lista de comandos
@@ -409,6 +424,33 @@ async def run_simulator(mock_mode: bool = False, phone: str = "5511999998888", u
                         status_badge = "⏳ [Pendente]" if rem.status == "pending" else f"[{rem.status}]"
                         ev_info = f" (Evento #{rem.event_id})" if rem.event_id else " (Lembrete Avulso)"
                         print(f"  • {status_badge} {trigger_str} - {rem.message_text}{ev_info}")
+            continue
+
+        elif user_input.lower() == "/contatos":
+            async with async_session_factory() as session:
+                service = AssistantService(session=session)
+                user = await service.user_repo.get_or_create(phone, user_name)
+                contacts = await service.contact_repo.list_by_user(user.id)
+                if not contacts:
+                    print("\n👥 Nenhum contato salvo na sua agenda.")
+                else:
+                    print(f"\n👥 Contatos salvos ({len(contacts)}):")
+                    for c in contacts:
+                        tel = c.phone_number or "Sem telefone"
+                        cat = f" [{c.category}]" if c.category else ""
+                        print(f"  • {c.name}: 📞 {tel}{cat}")
+            continue
+
+        elif user_input.lower() == "/briefing":
+            async with async_session_factory() as session:
+                service = AssistantService(session=session)
+                user = await service.user_repo.get_or_create(phone, user_name)
+                briefing = await service._generate_daily_briefing_reply(user, datetime.now(user_tz))
+                print(f"\n{briefing}")
+            continue
+
+        elif user_input.lower() == "/painel":
+            print("\n🌐 Painel Web Executivo disponível em: http://127.0.0.1:8000/painel (ou /dashboard)")
             continue
 
         elif user_input.lower() == "/auditoria":

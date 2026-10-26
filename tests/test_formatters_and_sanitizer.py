@@ -40,3 +40,25 @@ def test_data_sanitizer_masking():
     assert DataSanitizer.mask_secret("AIzaSyD-1234567890-AbCdEfGh") == "AIza...EfGh"
     assert DataSanitizer.mask_secret(None) == "N/A"
     assert DataSanitizer.mask_secret("short") == "***"
+
+
+def test_brazilian_formatter_all_weekdays():
+    """Garante que todos os dias da semana são traduzidos corretamente em português."""
+    expected_days = [
+        (datetime(2026, 10, 19), "Segunda-feira"),
+        (datetime(2026, 10, 20), "Terça-feira"),
+        (datetime(2026, 10, 21), "Quarta-feira"),
+        (datetime(2026, 10, 22), "Quinta-feira"),
+        (datetime(2026, 10, 23), "Sexta-feira"),
+        (datetime(2026, 10, 24), "Sábado"),
+        (datetime(2026, 10, 25), "Domingo"),
+    ]
+    for dt, expected in expected_days:
+        assert expected in BrazilianDateTimeFormatter.format_date(dt)
+
+
+def test_data_sanitizer_empty_and_special_chars():
+    """Valida mascaramento com caracteres não-alfanuméricos no telefone."""
+    assert DataSanitizer.mask_phone("+55 (11) 99999-0001") == "5511*****0001"
+    assert DataSanitizer.mask_phone("") == "N/A"
+

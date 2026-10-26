@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meu Assistente | Painel Executivo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#10b981', 600: '#059669', 700: '#047857' },
+            darkbg: '#0f172a',
+            darkcard: '#1e293b',
+            darkborder: '#334155'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background-color: #0b1120; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+  <!-- Top Navigation -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-xl shadow-lg shadow-emerald-500/20">
+        🤖
+      </div>
+      <div>
+        <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+          Meu Assistente <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">v0.3.0-RC</span>
+        </h1>
+        <p class="text-xs text-slate-400">Secretário Executivo Autônomo & Agenda Inteligente</p>
+      </div>
+    </div>
+
+    <!-- Status Badges -->
+    <div class="flex items-center gap-2 text-xs flex-wrap">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> WhatsApp: Conectado
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
+        <span class="w-2 h-2 rounded-full bg-blue-400"></span> G-Calendar: Híbrido OK
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
+        <span class="w-2 h-2 rounded-full bg-purple-400"></span> Maps & Trânsito: Ativo
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-300 font-medium">
+        📱 <span id="user-phone-display">+55 11 99999-0001</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+    <!-- Executive Briefing Card -->
+    <div id="briefing-box" class="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-800 p-6 shadow-xl relative overflow-hidden">
+      <div class="absolute -right-10 -bottom-10 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400">Resumo Executivo do Dia</span>
+          <h2 class="text-lg font-semibold text-white mt-1" id="briefing-title">Carregando briefing matinal...</h2>
+          <div class="mt-2 text-sm text-slate-300 whitespace-pre-line leading-relaxed font-sans" id="briefing-content">
+            Aguarde um instante enquanto conectamos à sua agenda...
+          </div>
+        </div>
+        <button onclick="loadBriefing()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition flex items-center gap-1">
+          🔄 Atualizar
+        </button>
+      </div>
+    </div>
+
+    <!-- Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Events Column (2 cols) -->
+      <section class="lg:col-span-2 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <h3 class="text-base font-semibold text-white">📅 Compromissos Agendados</h3>
+            <span id="events-count" class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">0</span>
+          </div>
+          <button onclick="openEventModal()" class="px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-600/20 transition flex items-center gap-2">
+            <span>+</span> Novo Compromisso
+          </button>
+        </div>
+
+        <div id="events-container" class="space-y-3">
+          <div class="text-center py-12 text-slate-500 text-sm">Carregando compromissos...</div>
+        </div>
+      </section>
+
+      <!-- Sidebar Column (1 col) -->
+      <aside class="space-y-6">
+        <!-- Contacts Card -->
+        <section class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold text-white flex items-center gap-2">
+              👥 Contatos <span id="contacts-count" class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">0</span>
+            </h3>
+            <button onclick="openContactModal()" class="text-xs text-emerald-400 hover:text-emerald-300 font-medium">
+              + Adicionar
+            </button>
+          </div>
+
+          <div class="relative">
+            <input type="text" id="contact-search" oninput="filterContacts()" placeholder="Buscar contato por nome..." class="w-full text-xs px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+          </div>
+
+          <div id="contacts-list" class="space-y-2 max-h-72 overflow-y-auto pr-1">
+            <div class="text-xs text-slate-500 text-center py-4">Nenhum contato salvo ainda.</div>
+          </div>
+        </section>
+
+        <!-- Reminders Card -->
+        <section class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold text-white flex items-center gap-2">
+              🔔 Lembretes Programados
+            </h3>
+            <button onclick="loadReminders()" class="text-xs text-slate-400 hover:text-slate-300">
+              🔄
+            </button>
+          </div>
+          <div id="reminders-list" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+            <div class="text-xs text-slate-500 text-center py-4">Carregando lembretes...</div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <!-- Event Modal -->
+  <div id="event-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative">
+      <div class="flex items-center justify-between">
+        <h4 class="text-lg font-semibold text-white">Criar Novo Compromisso</h4>
+        <button onclick="closeEventModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <!-- Conflict Alert Banner -->
+      <div id="event-conflict-banner" class="hidden p-3 rounded-xl bg-red-950/80 border border-red-800 text-red-200 text-xs"></div>
+
+      <form id="event-form" onsubmit="handleCreateEvent(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Título do Compromisso *</label>
+          <input type="text" id="ev-title" required placeholder="Ex: Consulta com Dr. Roberto" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Início *</label>
+            <input type="datetime-local" id="ev-start" required class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Término *</label>
+            <input type="datetime-local" id="ev-end" required class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Local / Endereço</label>
+          <input type="text" id="ev-location" placeholder="Ex: Av. Paulista, 1000 - Bela Vista" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Deslocamento (min)</label>
+            <input type="number" id="ev-travel" placeholder="Ex: 25" class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Lembrete Antes (min)</label>
+            <input type="number" id="ev-reminder" value="60" class="w-full text-xs px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
+          <button type="button" onclick="closeEventModal()" class="px-4 py-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition">Cancelar</button>
+          <button type="submit" id="btn-save-event" class="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-600/20 transition">Salvar Compromisso</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Contact Modal -->
+  <div id="contact-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl relative">
+      <div class="flex items-center justify-between">
+        <h4 class="text-lg font-semibold text-white">Cadastrar Contato</h4>
+        <button onclick="closeContactModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <form id="contact-form" onsubmit="handleCreateContact(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Nome Completo *</label>
+          <input type="text" id="ct-name" required placeholder="Ex: Dra. Mariana Costa" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Telefone / WhatsApp</label>
+          <input type="text" id="ct-phone" placeholder="Ex: 5511999998888" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">E-mail</label>
+          <input type="email" id="ct-email" placeholder="Ex: mariana@clinica.com" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Categoria</label>
+          <input type="text" id="ct-category" placeholder="Ex: Médico, Cliente, Família" class="w-full text-sm px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
+          <button type="button" onclick="closeContactModal()" class="px-4 py-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition">Cancelar</button>
+          <button type="submit" class="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-600/20 transition">Salvar Contato</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let allContacts = [];
+
+    // Helper de formatação de data
+    function formatDate(isoStr) {
+      const d = new Date(isoStr);
+      return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadBriefing() {
+      try {
+        const res = await fetch('/api/v1/briefing');
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById('briefing-title').innerText = `☀️ ${data.user_name} — ${data.events_count} compromisso(s) hoje`;
+          document.getElementById('briefing-content').innerText = data.briefing_text;
+        }
+      } catch (e) {
+        document.getElementById('briefing-content').innerText = 'Não foi possível carregar o resumo.';
+      }
+    }
+
+    async function loadEvents() {
+      try {
+        const res = await fetch('/api/v1/events');
+        const container = document.getElementById('events-container');
+        if (!res.ok) {
+          container.innerHTML = '<div class="text-sm text-red-400 text-center py-6">Erro ao carregar compromissos.</div>';
+          return;
+        }
+        const events = await res.json();
+        document.getElementById('events-count').innerText = events.length;
+
+        if (events.length === 0) {
+          container.innerHTML = `
+            <div class="text-center py-12 rounded-2xl border border-dashed border-slate-800 text-slate-500 text-sm">
+              🎉 Nenhum compromisso agendado no período. Sua agenda está livre!
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = events.map(ev => `
+          <div class="rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700">
+                  ${formatDate(ev.start_time)} - ${new Date(ev.end_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                ${ev.travel_time_minutes ? `<span class="text-xs text-amber-300 bg-amber-950/40 border border-amber-800 px-2 py-0.5 rounded-full">🚗 ~${ev.travel_time_minutes} min</span>` : ''}
+                ${ev.external_calendar_id ? `<span class="text-xs text-blue-400 bg-blue-950/30 border border-blue-900 px-2 py-0.5 rounded-full">G-Calendar</span>` : ''}
+              </div>
+              <h4 class="text-base font-semibold text-white">${ev.title}</h4>
+              ${ev.location ? `<p class="text-xs text-slate-400 flex items-center gap-1">📍 ${ev.location}</p>` : ''}
+            </div>
+            <button onclick="deleteEvent(${ev.id})" class="text-xs px-3 py-1.5 rounded-lg border border-red-900/50 text-red-400 hover:bg-red-950/40 transition self-start md:self-center">
+              Cancelar
+            </button>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function loadContacts() {
+      try {
+        const res = await fetch('/api/v1/contacts');
+        if (res.ok) {
+          allContacts = await res.json();
+          document.getElementById('contacts-count').innerText = allContacts.length;
+          renderContacts(allContacts);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderContacts(contacts) {
+      const list = document.getElementById('contacts-list');
+      if (contacts.length === 0) {
+        list.innerHTML = '<div class="text-xs text-slate-500 text-center py-4">Nenhum contato encontrado.</div>';
+        return;
+      }
+      list.innerHTML = contacts.map(c => `
+        <div class="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800 text-xs flex items-center justify-between">
+          <div>
+            <p class="font-medium text-slate-200">${c.name}</p>
+            <p class="text-slate-400">${c.phone || 'Sem telefone'}${c.email ? ' | ' + c.email : ''}</p>
+          </div>
+          ${c.phone ? `<a href="https://wa.me/${c.phone}" target="_blank" class="text-emerald-400 hover:underline">WhatsApp</a>` : ''}
+        </div>
+      `).join('');
+    }
+
+    function filterContacts() {
+      const q = document.getElementById('contact-search').value.toLowerCase();
+      const filtered = allContacts.filter(c => c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)));
+      renderContacts(filtered);
+    }
+
+    async function loadReminders() {
+      try {
+        const res = await fetch('/api/v1/reminders');
+        const list = document.getElementById('reminders-list');
+        if (res.ok) {
+          const reminders = await res.json();
+          if (reminders.length === 0) {
+            list.innerHTML = '<div class="text-xs text-slate-500 text-center py-4">Nenhum lembrete pendente.</div>';
+            return;
+          }
+          list.innerHTML = reminders.map(r => `
+            <div class="p-2.5 rounded-xl bg-slate-800/40 border border-slate-800 text-xs space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">${formatDate(r.send_at)}</span>
+                <span class="px-2 py-0.5 rounded text-[10px] ${r.status === 'sent' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-amber-950 text-amber-400 border border-amber-800'}">${r.status}</span>
+              </div>
+              <p class="text-slate-300">${r.message_text}</p>
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function openEventModal() {
+      document.getElementById('event-modal').classList.remove('hidden');
+      document.getElementById('event-modal').classList.add('flex');
+      document.getElementById('event-conflict-banner').classList.add('hidden');
+    }
+
+    function closeEventModal() {
+      document.getElementById('event-modal').classList.add('hidden');
+      document.getElementById('event-modal').classList.remove('flex');
+    }
+
+    function openContactModal() {
+      document.getElementById('contact-modal').classList.remove('hidden');
+      document.getElementById('contact-modal').classList.add('flex');
+    }
+
+    function closeContactModal() {
+      document.getElementById('contact-modal').classList.add('hidden');
+      document.getElementById('contact-modal').classList.remove('flex');
+    }
+
+    async function handleCreateEvent(e) {
+      e.preventDefault();
+      const payload = {
+        title: document.getElementById('ev-title').value,
+        start_time: new Date(document.getElementById('ev-start').value).toISOString(),
+        end_time: new Date(document.getElementById('ev-end').value).toISOString(),
+        location: document.getElementById('ev-location').value || null,
+        travel_time_minutes: document.getElementById('ev-travel').value ? parseInt(document.getElementById('ev-travel').value) : null,
+        reminder_minutes_before: parseInt(document.getElementById('ev-reminder').value) || 60
+      };
+
+      const btn = document.getElementById('btn-save-event');
+      btn.disabled = true;
+      btn.innerText = 'Verificando conflitos...';
+
+      const res = await fetch('/api/v1/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      btn.disabled = false;
+      btn.innerText = 'Salvar Compromisso';
+
+      if (res.status === 409) {
+        const err = await res.json();
+        const banner = document.getElementById('event-conflict-banner');
+        banner.innerText = '⚠️ Conflito Detectado: ' + (err.detail || err.error?.message || 'Existe um compromisso neste horário.');
+        banner.classList.remove('hidden');
+        return;
+      }
+
+      if (res.ok) {
+        closeEventModal();
+        document.getElementById('event-form').reset();
+        await loadEvents();
+        await loadBriefing();
+        await loadReminders();
+      }
+    }
+
+    async function deleteEvent(id) {
+      if (confirm('Tem certeza que deseja cancelar este compromisso?')) {
+        await fetch(`/api/v1/events/${id}`, { method: 'DELETE' });
+        await loadEvents();
+        await loadBriefing();
+      }
+    }
+
+    async function handleCreateContact(e) {
+      e.preventDefault();
+      const payload = {
+        name: document.getElementById('ct-name').value,
+        phone: document.getElementById('ct-phone').value || null,
+        email: document.getElementById('ct-email').value || null,
+        category: document.getElementById('ct-category').value || null
+      };
+
+      const res = await fetch('/api/v1/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        closeContactModal();
+        document.getElementById('contact-form').reset();
+        await loadContacts();
+      }
+    }
+
+    // Inicialização
+    window.addEventListener('DOMContentLoaded', () => {
+      loadBriefing();
+      loadEvents();
+      loadContacts();
+      loadReminders();
+    });
+  </script>
+</body>
+</html>

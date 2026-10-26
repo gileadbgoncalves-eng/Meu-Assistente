@@ -14,11 +14,14 @@ logger = logging.getLogger(__name__)
 
 
 class IncomingWhatsAppMessage(BaseModel):
-    """Mensagem de texto extraída do payload de webhook da Meta."""
+    """Mensagem de texto ou áudio extraída do payload de webhook da Meta."""
     sender_phone: str = Field(description="Telefone do remetente (formato internacional, ex: 5511999998888)")
     sender_name: str = Field(default="Usuário", description="Nome de exibição no WhatsApp se disponível")
     message_id: str = Field(description="Identificador único da mensagem atribuído pela Meta (wamid)")
-    text: str = Field(description="Texto da mensagem enviada")
+    text: str = Field(default="", description="Texto da mensagem enviada")
+    message_type: str = Field(default="text", description="Tipo da mensagem: 'text', 'audio', etc.")
+    media_id: str | None = Field(default=None, description="ID do arquivo de áudio para download via Graph API")
+    mime_type: str | None = Field(default=None, description="Tipo MIME do áudio (ex: audio/ogg; codecs=opus)")
     timestamp: str | None = Field(default=None, description="Timestamp da mensagem")
 
 
@@ -53,7 +56,7 @@ class WhatsAppClient:
         return hmac.compare_digest(computed_sig, expected_sig)
 
     def parse_webhook_payload(self, payload: dict) -> list[IncomingWhatsAppMessage]:
-        """Extrai as mensagens textuais do payload JSON padrão da Meta Cloud API."""
+        """Extrai as mensagens (texto ou áudio) do payload JSON padrão da Meta Cloud API."""
         extracted: list[IncomingWhatsAppMessage] = []
 
         try:
@@ -66,23 +69,42 @@ class WhatsAppClient:
                     messages = value.get("messages", [])
 
                     for msg in messages:
-                        # Processa apenas mensagens do tipo texto
-                        if msg.get("type") == "text":
-                            sender = msg.get("from")
-                            text_body = msg.get("text", {}).get("body", "").strip()
-                            wamid = msg.get("id")
+                        msg_type = msg.get("type")
+                        sender = msg.get("from")
+                        wamid = msg.get("id")
+                        if not sender or not wamid:
+                            continue
+                        name = contacts.get(sender, "Usuário")
 
-                            if sender and text_body and wamid:
-                                name = contacts.get(sender, "Usuário")
+                        if msg_type == "text":
+                            text_body = msg.get("text", {}).get("body", "").strip()
+                            if text_body:
                                 extracted.append(
                                     IncomingWhatsAppMessage(
                                         sender_phone=sender,
                                         sender_name=name,
                                         message_id=wamid,
                                         text=text_body,
+                                        message_type="text",
                                         timestamp=msg.get("timestamp"),
                                     )
                                 )
+                        elif msg_type == "audio":
+                            audio_info = msg.get("audio", {})
+                            media_id = audio_info.get("id")
+                            mime_type = audio_info.get("mime_type", "audio/ogg")
+                            extracted.append(
+                                IncomingWhatsAppMessage(
+                                    sender_phone=sender,
+                                    sender_name=name,
+                                    message_id=wamid,
+                                    text="",
+                                    message_type="audio",
+                                    media_id=media_id,
+                                    mime_type=mime_type,
+                                    timestamp=msg.get("timestamp"),
+                                )
+                            )
         except Exception as exc:
             logger.error("Erro ao fazer parse do payload do WhatsApp: %s", exc)
 
@@ -123,3 +145,26 @@ class WhatsAppClient:
         except Exception as exc:
             logger.error("Exceção ao comunicar com a WhatsApp Graph API: %s", exc)
             return False
+
+    async def download_media(self, media_id: str) -> bytes:
+        """Consulta a URL da mídia na Graph API da Meta e baixa os bytes do arquivo (ex: áudio OGG/Opus)."""
+        if not self.access_token:
+            logger.info("WhatsApp sem credenciais: simulando download de mídia %s", media_id)
+            return b"MOCK_OGG_AUDIO_BYTES_VOICE_NOTE"
+
+        try:
+            url = f"https://graph.facebook.com/{self.api_version}/{media_id}"
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.get(url, headers=headers)
+                if res.status_code == 200:
+                    media_url = res.json().get("url")
+                    if media_url:
+                        media_res = await client.get(media_url, headers=headers)
+                        if media_res.status_code == 200:
+                            return media_res.content
+            logger.warning("Falha ao obter URL da mídia %s na Meta Graph API", media_id)
+        except Exception as exc:
+            logger.error("Erro ao baixar mídia %s: %s", media_id, exc)
+
+        return b"MOCK_OGG_AUDIO_BYTES_VOICE_NOTE"

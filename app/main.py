@@ -5,12 +5,15 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.channels.schemas import (
     HealthResponse,
     WebhookResponse,
 )
+from app.channels.web_api import dashboard_router
+from app.channels.web_api import router as web_api_router
 from app.channels.whatsapp import IncomingWhatsAppMessage, WhatsAppClient
 from app.config import settings
 from app.db.session import async_session_factory, close_db, init_db
@@ -50,12 +53,22 @@ async def process_and_reply_whatsapp(message: IncomingWhatsAppMessage) -> None:
 
     async with async_session_factory() as session:
         service = AssistantService(session=session)
-        reply_text = await service.process_message(
-            phone_number=message.sender_phone,
-            raw_text=message.text,
-            idempotency_key=message.message_id,
-            user_name=message.sender_name,
-        )
+        if getattr(message, "message_type", "text") == "audio" and getattr(message, "media_id", None):
+            audio_bytes = await whatsapp_client.download_media(message.media_id)
+            reply_text = await service.process_audio_message(
+                phone_number=message.sender_phone,
+                audio_bytes=audio_bytes,
+                mime_type=message.mime_type or "audio/ogg",
+                idempotency_key=message.message_id,
+                user_name=message.sender_name,
+            )
+        else:
+            reply_text = await service.process_message(
+                phone_number=message.sender_phone,
+                raw_text=message.text,
+                idempotency_key=message.message_id,
+                user_name=message.sender_name,
+            )
         # Despacha a resposta de volta ao WhatsApp
         await whatsapp_client.send_text_message(
             recipient_phone=message.sender_phone,
@@ -110,10 +123,21 @@ TAGS_METADATA = [
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend do Assistente Pessoal de Agenda via WhatsApp com IA e Validação Determinística",
-    version="0.1.0",
+    version="0.3.0-RC",
     lifespan=lifespan,
     openapi_tags=TAGS_METADATA,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(web_api_router)
+app.include_router(dashboard_router)
 
 
 @app.exception_handler(DomainError)

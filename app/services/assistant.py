@@ -1,15 +1,18 @@
 """Serviço orquestrador do Meu Assistente (Pipeline de Conversa e Ações)."""
 
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.google_calendar import GoogleCalendarAdapter
 from app.ai.client import AIInterpreterProtocol, GeminiInterpreter
 from app.ai.schemas import AIInterpretationResult
 from app.db.models import EventModel, UserModel
 from app.db.repository import (
     ChangeLogRepository,
+    ContactRepository,
     EventRepository,
     IdempotencyRepository,
     ReminderRepository,
@@ -17,7 +20,8 @@ from app.db.repository import (
 )
 from app.domain.enums import ActionType, EventStatus, IdempotencyStatus, IntentType
 from app.domain.exceptions import IdempotencyDuplicateError
-from app.domain.formatters import BrazilianDateTimeFormatter
+from app.domain.formatters import BrazilianDateTimeFormatter, ExecutiveBriefingFormatter
+from app.domain.interfaces import CalendarAdapterProtocol
 from app.engine.conflict import ConflictDetector
 from app.engine.state_machine import (
     ConversationStateManager,
@@ -35,10 +39,12 @@ class AssistantService:
         session: AsyncSession,
         interpreter: AIInterpreterProtocol | None = None,
         state_manager: ConversationStateManager | None = None,
+        calendar_adapter: CalendarAdapterProtocol | None = None,
     ):
         self.session = session
         self.interpreter = interpreter or GeminiInterpreter()
         self.state_manager = state_manager or ConversationStateManager()
+        self.calendar_adapter = calendar_adapter or GoogleCalendarAdapter()
 
         # Repositórios
         self.user_repo = UserRepository(session)
@@ -46,6 +52,7 @@ class AssistantService:
         self.idempotency_repo = IdempotencyRepository(session)
         self.changelog_repo = ChangeLogRepository(session)
         self.reminder_repo = ReminderRepository(session)
+        self.contact_repo = ContactRepository(session)
 
     @staticmethod
     def _format_offset_br(minutes: int) -> str:
@@ -61,6 +68,46 @@ class AssistantService:
     def _format_time_br(dt: datetime) -> str:
         """Formata hora: 14h ou 14h30."""
         return BrazilianDateTimeFormatter.format_time(dt)
+
+    async def process_audio_message(
+        self,
+        phone_number: str,
+        audio_bytes: bytes,
+        mime_type: str = "audio/ogg",
+        idempotency_key: str | None = None,
+        user_name: str = "Usuário",
+        anchor_datetime: datetime | None = None,
+    ) -> str:
+        """Processa mensagem de voz (áudio): transcreve via IA multimodal e despacha no pipeline determinístico."""
+        user = await self.user_repo.get_or_create(
+            phone_number=phone_number,
+            display_name=user_name,
+        )
+        user_tz = ZoneInfo(user.timezone)
+        anchor_dt = anchor_datetime or datetime.now(user_tz)
+
+        # 1. Carrega contexto recente da conversa
+        recent_context = self.state_manager.format_context(user.id)
+
+        # 2. Transcrição e interpretação multimodal
+        transcribed_text, _ = await self.interpreter.transcribe_and_interpret_audio(
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+            context=[recent_context] if recent_context else None,
+            anchor_datetime=anchor_dt,
+            user_timezone=user.timezone,
+        )
+
+        # 3. Processamento determinístico do texto transcrito
+        reply = await self.process_message(
+            phone_number=phone_number,
+            raw_text=transcribed_text,
+            idempotency_key=idempotency_key,
+            user_name=user_name,
+            anchor_datetime=anchor_dt,
+        )
+
+        return f'🎤 *Áudio recebido:* "{transcribed_text}"\n\n{reply}'
 
     async def process_message(
         self,
@@ -120,6 +167,31 @@ class AssistantService:
                 self.state_manager.add_history_message(user.id, role="assistant", text=denied_msg)
                 return denied_msg
 
+        # 3.1 Comandos diretos de Contatos e Briefing Executivo
+        raw_lower = raw_text.lower().strip()
+        if any(b in raw_lower for b in ("resumo do meu dia", "resumo de hoje", "briefing de hoje", "briefing do meu dia", "resumo do dia", "meu briefing")):
+            briefing_text = await self._generate_daily_briefing_reply(user, anchor_dt)
+            await self.idempotency_repo.update_status(msg_key, status=IdempotencyStatus.PROCESSED)
+            self.state_manager.add_history_message(user.id, role="user", text=raw_text)
+            self.state_manager.add_history_message(user.id, role="assistant", text=briefing_text)
+            return briefing_text
+
+        save_match = re.search(r"^(?:salvar|adicionar|novo|cadastrar)\s+contato\s+(.+)$", raw_text, re.IGNORECASE)
+        if save_match:
+            contact_text = await self._handle_contact_save_text(user, save_match.group(1).strip())
+            await self.idempotency_repo.update_status(msg_key, status=IdempotencyStatus.PROCESSED)
+            self.state_manager.add_history_message(user.id, role="user", text=raw_text)
+            self.state_manager.add_history_message(user.id, role="assistant", text=contact_text)
+            return contact_text
+
+        search_match = re.search(r"^(?:qual\s+o\s+telefone\s+d[eoa]|buscar\s+contato|telefone\s+d[eoa]|contato\s+d[eoa])\s+(.+?)[\?\.]*$", raw_text, re.IGNORECASE)
+        if search_match:
+            contact_text = await self._handle_contact_query_text(user, search_match.group(1).strip())
+            await self.idempotency_repo.update_status(msg_key, status=IdempotencyStatus.PROCESSED)
+            self.state_manager.add_history_message(user.id, role="user", text=raw_text)
+            self.state_manager.add_history_message(user.id, role="assistant", text=contact_text)
+            return contact_text
+
         # 4. Ingestão de Contexto Recente e Interpretação Semântica por IA (Gemini)
         recent_context = self.state_manager.get_recent_history_context(user.id, max_messages=6)
         interpretation = await self.interpreter.interpret(
@@ -153,7 +225,13 @@ class AssistantService:
             response_text = await self._handle_reminder_request(user, validated, interpretation, anchor_dt)
 
         elif validated.intent == IntentType.QUERY_EVENTS:
-            response_text = await self._handle_query_events(user, validated, anchor_dt)
+            response_text = await self._handle_query_events(user, validated, anchor_dt, raw_text=raw_text)
+
+        elif validated.intent in (IntentType.CREATE_CONTACT, IntentType.MANAGE_CONTACT):
+            response_text = await self._handle_contact_save_text(user, raw_text)
+
+        elif validated.intent == IntentType.QUERY_CONTACTS:
+            response_text = await self._handle_contact_query_text(user, raw_text)
 
         elif validated.intent == IntentType.CANCEL_EVENT:
             response_text = await self._handle_cancel_proposal(user, validated, interpretation, anchor_dt)
@@ -216,10 +294,26 @@ class AssistantService:
             end_time=proposal.end_time,
             timezone=proposal.timezone_name,
             location_address=proposal.location_address,
+            location=proposal.location_address,
             participants_data=proposal.participants,
             status=EventStatus.CONFIRMED.value,
         )
         self.state_manager.set_last_event_id(user.id, event.id)
+
+        # Sincronização externa resiliente com Google Calendar
+        try:
+            gcal_res = await self.calendar_adapter.create_event(event)
+            ext_id = getattr(gcal_res, "external_id", None) or (str(gcal_res) if gcal_res else None)
+            if ext_id:
+                await self.event_repo.update_event(
+                    event_id=event.id,
+                    owner_user_id=user.id,
+                    updates={"external_calendar_id": ext_id},
+                    reason="Sincronização com Google Calendar",
+                )
+                event.external_calendar_id = ext_id
+        except Exception:
+            pass
 
         # Lembrete Automático ou Customizado
         reminder_str = await self._schedule_event_reminder(
@@ -368,8 +462,14 @@ class AssistantService:
         user: UserModel,
         proposal: ValidatedProposal,
         anchor_dt: datetime,
+        raw_text: str = "",
     ) -> str:
         """Processa consultas de agenda."""
+        raw_lower = raw_text.lower()
+        if any(k in raw_lower for k in ("resumo", "briefing", "como está meu dia", "como esta meu dia")):
+            target = proposal.start_time or anchor_dt
+            return await self._generate_daily_briefing_reply(user, target)
+
         start_search = proposal.start_time or anchor_dt.replace(hour=0, minute=0, second=0, microsecond=0)
         end_search = proposal.end_time or (start_search + timedelta(days=2))
 
@@ -531,10 +631,27 @@ class AssistantService:
                 end_time=end_time,
                 timezone=proposal.data.get("timezone", user.timezone),
                 location_address=proposal.data.get("location_address"),
+                location=proposal.data.get("location_address"),
                 participants_data=proposal.data.get("participants"),
                 status=EventStatus.CONFIRMED.value,
             )
             self.state_manager.set_last_event_id(user.id, event.id)
+
+            # Sincronização externa com Google Calendar
+            try:
+                gcal_res = await self.calendar_adapter.create_event(event)
+                ext_id = getattr(gcal_res, "external_id", None) or (str(gcal_res) if gcal_res else None)
+                if ext_id:
+                    await self.event_repo.update_event(
+                        event_id=event.id,
+                        owner_user_id=user.id,
+                        updates={"external_calendar_id": ext_id},
+                        reason="Sincronização com Google Calendar",
+                    )
+                    event.external_calendar_id = ext_id
+            except Exception:
+                pass
+
             reminder_minutes = (
                 proposal.data.get("reminder_minutes_before")
                 if proposal.data.get("reminder_minutes_before") is not None
@@ -577,6 +694,11 @@ class AssistantService:
                 updates=parsed_updates,
                 reason="Atualização confirmada pelo usuário via mensagem",
             )
+            if updated and updated.external_calendar_id:
+                try:
+                    await self.calendar_adapter.update_event(updated.external_calendar_id, parsed_updates)
+                except Exception:
+                    pass
             return f"✅ Pronto! O compromisso '{updated.title}' foi atualizado com sucesso."
 
         elif proposal.action_type == ActionType.CANCEL:
@@ -586,6 +708,84 @@ class AssistantService:
                 owner_user_id=user.id,
                 reason="Cancelamento confirmado pelo usuário via mensagem",
             )
+            if cancelled and cancelled.external_calendar_id:
+                try:
+                    await self.calendar_adapter.delete_event(cancelled.external_calendar_id)
+                except Exception:
+                    pass
             return f"🗑️ O compromisso '{cancelled.title}' foi cancelado."
 
         return "Ação executada com sucesso."
+
+    async def _generate_daily_briefing_reply(self, user: UserModel, target_date: datetime) -> str:
+        """Gera o resumo executivo diário de compromissos."""
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        events = await self.event_repo.list_events_in_range(
+            owner_user_id=user.id,
+            start_time=start_of_day,
+            end_time=end_of_day,
+        )
+        return ExecutiveBriefingFormatter.format_briefing(
+            user_name=user.display_name,
+            target_date=target_date,
+            events=list(events),
+        )
+
+    async def _handle_contact_save_text(self, user: UserModel, text: str) -> str:
+        """Cadastra ou atualiza um contato a partir de texto em linguagem natural."""
+        cleaned = re.sub(
+            r"^(?:salvar|adicionar|novo|cadastrar)\s+contato\s+",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        # Extrai número de telefone (sequência de 8 a 15 dígitos)
+        phone_match = re.search(r"(\+?\d[\d\s\-\(\)]{7,}\d)", cleaned)
+        phone_raw = ""
+        name = cleaned
+        if phone_match:
+            phone_raw = phone_match.group(1).strip()
+            name = (cleaned[:phone_match.start()] + cleaned[phone_match.end():]).strip(" :,-\t")
+
+        if not name:
+            return "Por favor, informe o nome do contato que deseja salvar."
+
+        phone_clean = re.sub(r"[^\d+]", "", phone_raw) if phone_raw else None
+
+        contact = await self.contact_repo.create(
+            owner_user_id=user.id,
+            name=name,
+            phone=phone_clean,
+        )
+        phone_info = f" ({phone_clean})" if phone_clean else ""
+        return f"👤 Contato '{contact.name}'{phone_info} salvo com sucesso na sua agenda!"
+
+    async def _handle_contact_query_text(self, user: UserModel, text: str) -> str:
+        """Busca contatos por nome."""
+        cleaned = re.sub(
+            r"^(?:qual\s+o\s+telefone\s+d[eoa]|buscar\s+contato|telefone\s+d[eoa]|contato\s+d[eoa])\s+",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip(" ?.")
+        if not cleaned:
+            cleaned = text.strip()
+
+        contacts = await self.contact_repo.search_by_name(owner_user_id=user.id, query=cleaned)
+        if not contacts:
+            # Tenta sem artigos iniciais (o, a, do, da, de)
+            sub_name = re.sub(r"^(?:o|a|do|da|de)\s+", "", cleaned, flags=re.IGNORECASE).strip()
+            if sub_name and sub_name != cleaned:
+                contacts = await self.contact_repo.search_by_name(owner_user_id=user.id, query=sub_name)
+
+        if not contacts:
+            return f"Não encontrei nenhum contato com o nome '{cleaned}' na sua agenda."
+
+        lines = [f"👤 *Contato(s) encontrado(s) ({len(contacts)}):*"]
+        for c in contacts:
+            phone = c.phone_number or "Sem telefone informado"
+            email = f" | ✉️ {c.email}" if c.email else ""
+            lines.append(f"• *{c.name}*: 📞 {phone}{email}")
+        return "\n".join(lines)
